@@ -780,44 +780,60 @@ async function mainClaudeCli(opts, { stdin, stdout, stderr, env }) {
   const style = createStyle(rich && colorEnabled({ stdout, env }), theme);
   const spinner = new Spinner(stdout, style, { enabled: rich && interactive });
   const ac = new AbortController();
-  process.once('SIGINT', () => ac.abort());
+  if (!interactive) process.once('SIGINT', () => ac.abort());   // print mode: interactive mode wires its own listener below
   const sessionId = newSessionId();
   let turns = 0;
+  let turnActive = false;
   const run = async (prompt) => {
-    spinner.start('Thinking');
-    const gen = runClaudeCli({
-      prompt, cwd: opts.cwd, model: opts.model, permissionMode: opts.permissionMode, signal: ac.signal, env,
-      ...(turns === 0 ? { sessionId } : { resume: sessionId }),
-    });
-    turns++;
-    let step;
-    while (!(step = await gen.next()).done) {
-      const e = step.value;
+    turnActive = true;
+    try {
+      spinner.start('Thinking');
+      const gen = runClaudeCli({
+        prompt, cwd: opts.cwd, model: opts.model, permissionMode: opts.permissionMode, signal: ac.signal, env,
+        ...(turns === 0 ? { sessionId } : { resume: sessionId }),
+      });
+      turns++;
+      let step;
+      while (!(step = await gen.next()).done) {
+        const e = step.value;
+        spinner.stop();
+        if (e.type === 'assistant') {
+          for (const b of e.content) {
+            if (b.type === 'text' && b.text.trim()) stdout.write(`${b.text}\n`);
+            if (b.type === 'tool_use') { stdout.write(`\n${style.cyan('●')} ${style.bold(b.name)}${style.dim(`(${preview(b.input)})`)}\n`); spinner.start('Running'); }
+          }
+          if (!e.content.some((b) => b.type === 'tool_use')) spinner.start('Thinking');
+        } else if (e.type === 'tool_result') {
+          const body = preview(String(e.result.content).replace(/\s+/g, ' '), 140);
+          stdout.write(`  ${style.dim('⎿')} ${e.result.is_error ? style.red(`✗ ${body}`) : style.dim(body)}\n`);
+          spinner.start('Thinking');
+        } else if (e.type === 'error') { stderr.write(`claudecraft: ${e.error.message}\n`); }
+      }
       spinner.stop();
-      if (e.type === 'assistant') {
-        for (const b of e.content) {
-          if (b.type === 'text' && b.text.trim()) stdout.write(`${b.text}\n`);
-          if (b.type === 'tool_use') { stdout.write(`\n${style.cyan('●')} ${style.bold(b.name)}${style.dim(`(${preview(b.input)})`)}\n`); spinner.start('Running'); }
-        }
-        if (!e.content.some((b) => b.type === 'tool_use')) spinner.start('Thinking');
-      } else if (e.type === 'tool_result') {
-        const body = preview(String(e.result.content).replace(/\s+/g, ' '), 140);
-        stdout.write(`  ${style.dim('⎿')} ${e.result.is_error ? style.red(`✗ ${body}`) : style.dim(body)}\n`);
-        spinner.start('Thinking');
-      } else if (e.type === 'error') { stderr.write(`claudecraft: ${e.error.message}\n`); }
-    }
-    spinner.stop();
-    const t = step.value;
-    if (t.costUsd !== undefined) stderr.write(`claudecraft: ${style.dim(`[claude-cli] ${t.turns} turns, $${Number(t.costUsd).toFixed(4)}, ${t.durationMs ?? '?'}ms`)}\n`);
-    return t.reason === 'completed' ? 0 : 1;
+      const t = step.value;
+      if (t.costUsd !== undefined) stderr.write(`claudecraft: ${style.dim(`[claude-cli] ${t.turns} turns, $${Number(t.costUsd).toFixed(4)}, ${t.durationMs ?? '?'}ms`)}\n`);
+      return t.reason === 'completed' ? 0 : 1;
+    } finally { turnActive = false; }
   };
   if (opts.print !== undefined) return run(opts.prompt);
 
   const termMode = Boolean(stdin.isTTY);
-  const rl = createInterface({ input: stdin, terminal: termMode, ...(termMode ? { output: stdout } : {}) });
+  const rl = createInterface({
+    input: stdin, terminal: termMode, ...(termMode ? { output: stdout, completer: slashCompleter(['exit', 'quit']) } : {}),
+  });
+  // Ctrl+C: cancel a running turn; at an idle prompt, press twice to exit (same convention as the default path).
+  let exitArmed = false;
+  const onInterrupt = () => {
+    if (turnActive && !ac.signal.aborted) { ac.abort(); return; }
+    if (!termMode) process.exit(130);
+    if (exitArmed) { stdout.write('\n'); process.exit(130); }
+    exitArmed = true;
+    stdout.write(`\n${style.dim('(press Ctrl-C again to exit)')}\n`);
+    setTimeout(() => { exitArmed = false; }, 2000).unref();
+  };
   // In raw mode (termMode) the kernel no longer translates Ctrl+C into a real SIGINT - readline detects the byte
   // itself and emits its own 'SIGINT' event instead, so that's what needs listening to here, same as the default path.
-  if (termMode) rl.on('SIGINT', () => ac.abort()); else process.on('SIGINT', () => ac.abort());
+  if (termMode) rl.on('SIGINT', onInterrupt); else process.on('SIGINT', onInterrupt);
   stdout.write(`${style.bold('claudecraft')} ${style.dim(`(claude-cli backend, ${opts.permissionMode ?? 'default'}) in ${opts.cwd}`)}\nType a request; /exit to quit.\n`);
   let code = 0;
   if (opts.prompt) code = await run(opts.prompt);
