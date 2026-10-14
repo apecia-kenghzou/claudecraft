@@ -132,7 +132,7 @@ const preview = (v, n = 100) => { const s = typeof v === 'string' ? v : JSON.str
 
 export async function main(argv, { stdin = process.stdin, stdout = process.stdout, stderr = process.stderr, env = process.env } = {}) {
   let opts;
-  try { opts = parseArgs(argv); } catch (e) { stderr.write(`rea: ${e.message}\n`); return 2; }
+  try { opts = parseArgs(argv); } catch (e) { stderr.write(`claudecraft: ${e.message}\n`); return 2; }
   if (opts.help) { stdout.write(HELP); return 0; }
 
   if (opts.backend === 'claude-cli') return mainClaudeCli(opts, { stdin, stdout, stderr, env });
@@ -177,15 +177,15 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
         apiKey: env.ANTHROPIC_API_KEY, baseURL: opts.baseURL ?? (env.ANTHROPIC_BASE_URL || undefined), model: opts.model,
         fallbackModel: opts.fallbackModel, stream: !opts.noStream,
       });
-  } catch (e) { stderr.write(`rea: ${e.message}\n`); rl.close(); return 1; }
+  } catch (e) { stderr.write(`claudecraft: ${e.message}\n`); rl.close(); return 1; }
 
   let settings;
-  try { settings = loadSettings(opts.cwd, { managedSettingsFile: opts.managedSettingsFile }); } catch (e) { stderr.write(`rea: ${e.message}\n`); rl.close(); return 1; }
+  try { settings = loadSettings(opts.cwd, { managedSettingsFile: opts.managedSettingsFile }); } catch (e) { stderr.write(`claudecraft: ${e.message}\n`); rl.close(); return 1; }
 
   let outputSchema;
   if (opts.outputSchemaFile) {
     try { outputSchema = JSON.parse(readFileSync(path.resolve(opts.cwd, opts.outputSchemaFile), 'utf8')); }
-    catch (e) { stderr.write(`rea: --output-schema: ${e.message}\n`); rl.close(); return 1; }
+    catch (e) { stderr.write(`claudecraft: --output-schema: ${e.message}\n`); rl.close(); return 1; }
   }
 
   const rules = new RuleSet({ cwd: opts.cwd });
@@ -196,9 +196,9 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
     }
     rules.addAll('allow', opts.allowedTools, 'cliArg');
     rules.addAll('deny', opts.disallowedTools, 'cliArg');
-  } catch (e) { stderr.write(`rea: ${e.message}\n`); rl.close(); return 2; }
+  } catch (e) { stderr.write(`claudecraft: ${e.message}\n`); rl.close(); return 2; }
   const permissionMode = opts.permissionMode ?? settings.defaultMode ?? 'default';
-  if (!PERMISSION_MODES.includes(permissionMode)) { stderr.write(`rea: invalid defaultMode "${permissionMode}" in settings\n`); rl.close(); return 2; }
+  if (!PERMISSION_MODES.includes(permissionMode)) { stderr.write(`claudecraft: invalid defaultMode "${permissionMode}" in settings\n`); rl.close(); return 2; }
 
   const state = createState();
   let streamed = false;
@@ -208,7 +208,7 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
   let turnAc = null;          // one controller per turn, so Ctrl-C cancels the turn and not the session
   let exitArmed = false;
   const store = opts.noPersist ? undefined : new SessionStore({ cwd: opts.cwd });
-  const warn = (m) => stderr.write(`rea: ${m}\n`);
+  const warn = (m) => stderr.write(`claudecraft: ${m}\n`);
   const agentDefs = loadAgents(opts.cwd, { warn });
   const memory = opts.noMemory ? { files: [], skipped: [] } : discoverMemory(opts.cwd, { warn });
   const skills = loadSkills(opts.cwd, { warn });
@@ -219,7 +219,7 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
   if (opts.sandboxNetwork) sbCfg.network = opts.sandboxNetwork;
   let sandboxOn = Boolean(sbCfg.enabled);
   if (sandboxOn && !sandboxAvailable()) {
-    if (sbCfg.failIfUnavailable) { stderr.write('rea: sandbox requested but is not available on this platform (macOS Seatbelt or Linux bubblewrap only)\n'); rl.close(); return 1; }
+    if (sbCfg.failIfUnavailable) { stderr.write('claudecraft: sandbox requested but is not available on this platform (macOS Seatbelt or Linux bubblewrap only)\n'); rl.close(); return 1; }
     warn('sandbox requested but not available on this platform; Bash commands will run unsandboxed');
     sandboxOn = false;
   }
@@ -235,7 +235,7 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
     let lspServers;
     if (opts.lspConfigFile) {
       try { lspServers = { ...DEFAULT_SERVERS, ...JSON.parse(readFileSync(path.resolve(opts.cwd, opts.lspConfigFile), 'utf8')).servers }; }
-      catch (e) { stderr.write(`rea: --lsp-config: ${e.message}\n`); rl.close(); return 1; }
+      catch (e) { stderr.write(`claudecraft: --lsp-config: ${e.message}\n`); rl.close(); return 1; }
     }
     lspTool = createLspTool({ cwd: opts.cwd, warn, ...(lspServers ? { servers: lspServers } : {}) });
     tools.push(lspTool);
@@ -357,7 +357,7 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
     compactionExtra: () => (taskList.items.length ? `Task list at the time of compaction:\n${taskList.render()}` : ''),
     contextWindow: opts.contextWindow ?? windowForModel(model.modelName),
     system: buildSystemPrompt({ cwd: opts.cwd }), maxTurns: opts.maxTurns,
-    hooks: buildHooks(settings, { cwd: opts.cwd, warn: (m) => stderr.write(`rea: ${m}\n`) }),
+    hooks: buildHooks(settings, { cwd: opts.cwd, warn: (m) => stderr.write(`claudecraft: ${m}\n`) }),
     askUser: serialize(async ({ label, rule, outsideWorkspace, note: shellNote }) => {
       // print mode with no terminal to prompt on: deny rather than hang.
       if (!interactive && !stdin.isTTY) return false;
@@ -393,16 +393,16 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
           break;
         }
         case 'absorbed_mid_turn': spinner.stop(); stdout.write(`${style.dim('  ↳ added your message to the running turn')}\n`); break;
-        case 'micro_compact': spinner.stop(); stderr.write(`rea: cleared ${e.cleared} old tool result(s), freeing ~${e.freedTokens} tokens\n`); break;
+        case 'micro_compact': spinner.stop(); stderr.write(`claudecraft: cleared ${e.cleared} old tool result(s), freeing ~${e.freedTokens} tokens\n`); break;
         case 'cache_miss': break;     // counted in /usage; not worth interrupting the user
-        case 'retry': spinner.stop(); stderr.write(`\nrea: ${e.kind}; retry ${e.attempt} in ${Math.round(e.delayMs)}ms\n`); streamed = false; break;
-        case 'model_fallback': spinner.stop(); stderr.write(`rea: switching model ${e.from} -> ${e.to}\n`); break;
-        case 'warning': spinner.stop(); stderr.write(`rea: ${e.message}\n`); break;
-        case 'compact_start': spinner.stop(); stderr.write(`rea: compacting context (${e.trigger}, ~${e.tokens} tokens)...\n`); spinner.start('Compacting'); break;
-        case 'compact_skipped': spinner.stop(); stderr.write(`rea: compaction skipped: ${e.reason}\n`); break;
-        case 'compact_end': spinner.stop(); stderr.write(`rea: compacted ~${e.preTokens} -> ~${e.postTokens} tokens (${e.summarized} messages summarized${e.reattached?.length ? `, ${e.reattached.length} file(s) re-attached` : ''})\n`); break;
-        case 'context_warning': spinner.stop(); stderr.write(`rea: context is ${100 - e.pctLeft}% of the way to auto-compaction\n`); break;
-        case 'error': spinner.stop(); stderr.write(`rea: ${e.error.message}\n`); break;
+        case 'retry': spinner.stop(); stderr.write(`\nclaudecraft: ${e.kind}; retry ${e.attempt} in ${Math.round(e.delayMs)}ms\n`); streamed = false; break;
+        case 'model_fallback': spinner.stop(); stderr.write(`claudecraft: switching model ${e.from} -> ${e.to}\n`); break;
+        case 'warning': spinner.stop(); stderr.write(`claudecraft: ${e.message}\n`); break;
+        case 'compact_start': spinner.stop(); stderr.write(`claudecraft: compacting context (${e.trigger}, ~${e.tokens} tokens)...\n`); spinner.start('Compacting'); break;
+        case 'compact_skipped': spinner.stop(); stderr.write(`claudecraft: compaction skipped: ${e.reason}\n`); break;
+        case 'compact_end': spinner.stop(); stderr.write(`claudecraft: compacted ~${e.preTokens} -> ~${e.postTokens} tokens (${e.summarized} messages summarized${e.reattached?.length ? `, ${e.reattached.length} file(s) re-attached` : ''})\n`); break;
+        case 'context_warning': spinner.stop(); stderr.write(`claudecraft: context is ${100 - e.pctLeft}% of the way to auto-compaction\n`); break;
+        case 'error': spinner.stop(); stderr.write(`claudecraft: ${e.error.message}\n`); break;
         default: break;
       }
     },
@@ -437,7 +437,7 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
   };
   if (opts.continue || opts.resume) {
     const err = resumeInto(opts.continue ? 'latest' : opts.resume);
-    if (err) { stderr.write(`rea: ${err}\n`); await closeMcp(); rl.close(); return 1; }
+    if (err) { stderr.write(`claudecraft: ${err}\n`); await closeMcp(); rl.close(); return 1; }
   }
   await harness.sessionStart(opts.continue || opts.resume ? 'resume' : 'startup');
   if (memory.files.length) await harness.emitHook('InstructionsLoaded', { files: memory.files.map((f) => ({ path: f.path, type: f.type })) });
@@ -462,10 +462,10 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
     spinner.start('Thinking');
     try {
       const r = await harness.run(prompt);
-      if (r.reason === 'max_turns') stderr.write(`rea: stopped after ${r.turns} turns (--max-turns)\n`);
-      if (r.stopped === 'aborted') stderr.write('rea: interrupted\n');
+      if (r.reason === 'max_turns') stderr.write(`claudecraft: stopped after ${r.turns} turns (--max-turns)\n`);
+      if (r.stopped === 'aborted') stderr.write('claudecraft: interrupted\n');
       return r;
-    } catch (e) { stderr.write(`rea: ${e.message}\n`); return null; } finally {
+    } catch (e) { stderr.write(`claudecraft: ${e.message}\n`); return null; } finally {
       spinner.stop();
       renderer?.flush();
       live.turnActive = false;
@@ -487,7 +487,7 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
 
   if (!interactive) {
     const ex = await expandSlash(opts.prompt);
-    if (ex.unknown) { stderr.write(`rea: unknown command /${ex.unknown}\n`); await harness.sessionEnd('exit'); await closeMcp(); rl.close(); return 2; }
+    if (ex.unknown) { stderr.write(`claudecraft: unknown command /${ex.unknown}\n`); await harness.sessionEnd('exit'); await closeMcp(); rl.close(); return 2; }
     const r = await turn(ex.prompt);
     if (r?.structuredOutput !== undefined) stdout.write(`${JSON.stringify(r.structuredOutput, null, 2)}\n`);
     await harness.sessionEnd('exit');
@@ -725,10 +725,10 @@ async function mainClaudeCli(opts, { stdin, stdout, stderr, env }) {
         }
       } else if (e.type === 'tool_result') {
         stdout.write(`  ⎿ ${e.result.is_error ? '✗ ' : ''}${preview(String(e.result.content).replace(/\s+/g, ' '), 140)}\n`);
-      } else if (e.type === 'error') stderr.write(`rea: ${e.error.message}\n`);
+      } else if (e.type === 'error') stderr.write(`claudecraft: ${e.error.message}\n`);
     }
     const t = step.value;
-    if (t.costUsd !== undefined) stderr.write(`rea: [claude-cli] ${t.turns} turns, $${Number(t.costUsd).toFixed(4)}, ${t.durationMs ?? '?'}ms\n`);
+    if (t.costUsd !== undefined) stderr.write(`claudecraft: [claude-cli] ${t.turns} turns, $${Number(t.costUsd).toFixed(4)}, ${t.durationMs ?? '?'}ms\n`);
     return t.reason === 'completed' ? 0 : 1;
   };
   if (opts.print !== undefined) return run(opts.prompt);
