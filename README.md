@@ -3,7 +3,7 @@
   <img src="https://img.shields.io/badge/dependencies-zero-success?style=flat-square" alt="Zero runtime dependencies">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-informational?style=flat-square" alt="macOS and Linux">
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT license">
-  <img src="https://img.shields.io/badge/status-experimental-orange?style=flat-square" alt="Experimental">
+  <img src="https://img.shields.io/badge/status-experimental-blue?style=flat-square" alt="Experimental">
 </p>
 
 <h1 align="center">ClaudeCraft</h1>
@@ -102,6 +102,9 @@ claudecraft --provider openai --base-url http://localhost:8080/v1 --model your-m
 - **Context compaction** that survives repeated compactions without losing the original task or re-attaching the wrong
   files.
 - **MCP client** — stdio and HTTP servers, resource tools, and user-input elicitation mid-call.
+- **Terminal UI** — 3 color themes (`--theme dark|light|mono`) and an opt-in (`--multiline`) multi-line input editor
+  (arrow keys move within the input across lines; Enter submits, `ctrl+j`/a trailing `\` add a newline instead).
+  Experimental — not verified against every terminal, hence opt-in.
 - **Git worktree isolation, structured output, lazy (deferred) tool loading, a real LSP client, Jupyter notebook
   editing, hooks (including a real file watcher and MCP elicitation)** — flag-level detail for every feature is in
   [ARCHITECTURE.md](ARCHITECTURE.md) (what's built, per subsystem) and [EVIDENCE.md](EVIDENCE.md) (exactly how).

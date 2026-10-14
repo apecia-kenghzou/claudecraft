@@ -141,7 +141,7 @@ sessionTitle, initialUserMessage}`, top-level `decision`, `continue`/`stopReason
 | 11 | Shell analysis | **DONE (v0.15)**: tokenizer, command classes, path operands, redirects, wrappers, recursive and symlink checks feed Read/Edit/Write rules | Remaining: OS sandbox, interpreter-aware analysis | Safety |
 | 10 | Plan mode + questions | **DONE (v0.13)**: EnterPlanMode/ExitPlanMode with approval dialog, plan file, `/plan`, AskUserQuestion | Remaining: phased interview, external editor, per-project plan storage | Workflow |
 | 9 | Long tail (partial) | **v0.12**: WebFetch, WebSearch (SearXNG/Brave), Task tools, /help /model /status /usage /tasks /export /diff /init | Remaining: ~25 tools (worktrees, cron, LSP, notebooks, plan mode, AskUserQuestion...), ~80 slash commands, ~20 hook events | Breadth |
-| 8 | TUI | **DONE (v0.11, lightweight)**: spinner, streamed markdown-lite, diffs, permission dialog, footer, history + completion, per-turn Ctrl-C; no Ink | Remaining: full-screen layout, multi-line editor, mouse, themes | Last; the loop must stream first |
+| 8 | TUI | **DONE (v0.11, lightweight; v0.27 theming + multi-line editor)**: spinner, streamed markdown-lite, diffs, permission dialog, footer, history + completion, per-turn Ctrl-C, 3 color themes, opt-in (`--multiline`) multi-line input editor with bundle-evidenced newline conventions; no Ink | Remaining: full-screen (alternate-screen, pinned-input) layout, mouse; multi-line editor is unverified on a real pty from this environment | Last; the loop must stream first |
 
 ## 8. A note on provenance
 

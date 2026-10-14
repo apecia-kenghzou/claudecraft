@@ -357,7 +357,7 @@
   [
    "Terminal UI",
    "L3",
-   "lightweight (no Ink): spinner, diffs, dialog, footer, input editing; no full-screen/multi-line editor"
+   "lightweight (no Ink): spinner, diffs, dialog, footer, input editing, 3 themes, opt-in multi-line editor (bundle-evidenced newline conventions, unit-tested pure logic; raw-mode wiring unverified on a real pty here); no full-screen layout/mouse"
   ],
   [
    "Worktrees / StructuredOutput / ToolSearch",

@@ -537,3 +537,31 @@ other platforms. `loadSettings()` reads it *last*, so its `defaultMode`/`sandbox
 which already gives "cannot be widened" for free, since a deny from any source always beats an allow from any other
 regardless of read order (no extra enforcement code needed; this is just how `RuleSet` already worked). `/config` and
 `settingsSources()` list it as a fourth source alongside user/project/local settings.
+
+## 28. Multi-line input editor, theming (v0.27)
+**Multi-line input.** The newline conventions are bundle-evidenced: the strings `"shift+enter"`, `"ctrl+j"`, and
+`"backslash (\) + return to add newline"` appear together in the bundle's own help text, naming exactly the three
+ways to add a newline instead of submitting. The editor itself (`src/editor.js`) is rea's own design:
+- `parseKey()` turns raw stdin bytes into a structured key event - Enter is CR (`\r`), Ctrl+J is LF (`\n`); in raw
+  mode these are genuinely different bytes, which is how the two can be told apart at all. `shift+enter` is only
+  recognized when the terminal actually sends a distinguishable sequence for it (the Kitty keyboard protocol's
+  `CSI 13;2u`) - this project never sends the protocol's own opt-in handshake, so on most terminals "shift+enter"
+  degrades to a plain Enter (submits), same as any other terminal app that doesn't ask for that handshake either.
+  Documented as a real, not silent, gap.
+- `LineEditor` is a pure multi-line buffer + cursor (insert, backspace/delete across line boundaries, arrow
+  navigation, home/end, kill-to-end/kill-line) with no terminal dependency at all, fully unit-tested
+  (`test/editor.test.js`).
+- The raw-mode wiring and screen redraw (`multilineAsk()` in `src/cli.js`) is opt-in via `--multiline` (default off)
+  for exactly one reason: it cannot be automated-tested in this environment (no pty), and readline (used for every
+  *other* prompt - permission dialogs, plan approval, questions) already manages stdin's raw mode and its own
+  internal data listener for the session's whole life. Toggling raw mode a second time would fight readline;
+  instead, readline's own `'data'` listener is detached while the editor is active and restored verbatim
+  afterward, using only public `EventEmitter` APIs (no readline internals). Row-count math assumes one screen row
+  per logical line (no soft-wrap awareness for very long single lines) and terminal resize isn't handled -
+  acceptable, documented limits for a v1, not something this environment can verify further without a real pty.
+
+**Theming.** Own design; no bundle evidence for specific color codes or a `dark`/`light`/`mono` naming scheme was
+sought (out of scope - this is a visual-polish feature, not a loop/protocol behavior). `createStyle()`
+(`src/ui.js`) now takes a theme name and keeps the same semantic role names (`red`/`green`/.../`gray`,
+`bold`/`dim`/`italic`/`underline`) across all three presets, so no call site in `cli.js` had to change.
+`--theme`, `REA_THEME`, and `{"ui":{"theme":...}}` in settings resolve in that precedence order.

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   richEnabled, colorEnabled, createStyle, stripAnsi, replacementDiff, renderDiff, toolPreview, formatInline,
-  MarkdownFormatter, StreamRenderer, Spinner, footerLine, slashCompleter,
+  MarkdownFormatter, StreamRenderer, Spinner, footerLine, slashCompleter, THEME_NAMES, resolveTheme,
 } from '../src/ui.js';
 
 const tty = { isTTY: true };
@@ -22,6 +22,18 @@ test('createStyle wraps with ANSI when on and is the identity when off', () => {
   assert.equal(on.red('x'), '\x1b[31mx\x1b[0m');
   assert.equal(off.red('x'), 'x');
   assert.equal(stripAnsi(on.bold(on.cyan('hi'))), 'hi');
+});
+
+test('themes: dark/light/mono presets; unknown name falls back to dark; structural styles survive mono', () => {
+  assert.deepEqual(THEME_NAMES, ['dark', 'light', 'mono']);
+  assert.equal(resolveTheme('nope'), resolveTheme('dark'));
+  const dark = createStyle(true, 'dark'), light = createStyle(true, 'light'), mono = createStyle(true, 'mono');
+  assert.equal(dark.gray('x'), '\x1b[90mx\x1b[0m');
+  assert.equal(light.gray('x'), '\x1b[2mx\x1b[0m');          // avoids bright-black on a light background
+  assert.equal(mono.gray('x'), 'x');                          // no color at all in mono
+  assert.equal(mono.red('x'), 'x');
+  assert.equal(mono.bold('x'), '\x1b[1mx\x1b[0m');             // structural styles are not color and still work
+  assert.equal(createStyle(false, 'dark').gray('x'), 'x');     // color disabled entirely overrides any theme
 });
 
 test('replacementDiff: shared head/tail become context, middle is -/+, long diffs are clipped', () => {

@@ -9,7 +9,8 @@ import { createAskTool, createPlanTools, planFilePath } from './plan.js';
 import { sandboxAvailable, sandboxOptionsFor, buildProfile, sandboxKind } from './sandbox.js';
 import { MarkdownFormatter } from './ui.js';
 import { randomUUID } from 'node:crypto';
-import { Spinner, StreamRenderer, colorEnabled, createStyle, footerLine, richEnabled, shortenInput, shortenPaths, slashCompleter, toolPreview } from './ui.js';
+import { Spinner, StreamRenderer, colorEnabled, createStyle, footerLine, richEnabled, shortenInput, shortenPaths, slashCompleter, stripAnsi, toolPreview, THEME_NAMES } from './ui.js';
+import { LineEditor, frameLines, parseKey } from './editor.js';
 import path from 'node:path';
 import { Harness, PERMISSION_MODES } from './harness.js';
 import { defaultTools, createState } from './tools.js';
@@ -70,6 +71,11 @@ Options:
   --no-lsp                     do not register the LSP (code intelligence) tool
   --lsp-config <file>          JSON {"servers":{".ext":{"command":...,"args":[...]}}}; merged over the built-in registry
   --plain                     no colors, spinner, diffs or line editing (also REA_PLAIN=1 / NO_COLOR)
+  --theme <dark|light|mono>   color preset (default: dark; also REA_THEME or {"ui":{"theme":...}} in settings)
+  --multiline                 opt-in multi-line input editor for the main prompt: arrow keys move within the
+                              input across lines; Enter submits, ctrl+j / shift+enter (where the terminal reports
+                              it) / a trailing "\" add a newline instead. Experimental - not verified on every
+                              terminal; falls back to plain input if the editor fails to start
   --max-turns <n>             default: 25
   --cwd <dir>                 working directory
   -h, --help
@@ -101,6 +107,8 @@ export function parseArgs(argv) {
     else if (a === '--no-memory') o.noMemory = true;
     else if (a === '--no-mcp') o.noMcp = true;
     else if (a === '--plain') o.plain = true;
+    else if (a === '--theme') o.theme = val();
+    else if (a === '--multiline') o.multiline = true;
     else if (a === '--sandbox') o.sandbox = true;
     else if (a === '--no-sandbox') o.sandbox = false;
     else if (a === '--sandbox-network') o.sandboxNetwork = val();
@@ -202,7 +210,9 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
 
   const state = createState();
   let streamed = false;
-  const style = createStyle(rich && colorEnabled({ stdout, env }));
+  const theme = opts.theme ?? env.REA_THEME ?? settings.theme ?? 'dark';
+  if (!THEME_NAMES.includes(theme)) { stderr.write(`claudecraft: --theme must be one of ${THEME_NAMES.join(', ')}\n`); rl.close(); return 2; }
+  const style = createStyle(rich && colorEnabled({ stdout, env }), theme);
   const spinner = new Spinner(stdout, style, { enabled: rich && interactive });
   const renderer = rich ? new StreamRenderer((t) => stdout.write(t), style) : null;
   let turnAc = null;          // one controller per turn, so Ctrl-C cancels the turn and not the session
@@ -485,6 +495,64 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
   };
   if (termMode) rl.on('SIGINT', onInterrupt); else process.on('SIGINT', onInterrupt);
 
+  /**
+   * Opt-in (--multiline) raw-mode multi-line editor for the main prompt only; every other prompt (permission
+   * dialogs, plan approval, questions) keeps using the plain `ask()`/readline path above, unchanged. EVIDENCE.md
+   * §28: newline conventions (ctrl+j, shift+enter where the terminal reports it, trailing "\") are implemented in
+   * src/editor.js and unit-tested there; this function is just the raw-byte wiring and screen redraw, which has
+   * no automated test (no pty in this environment) - verify by hand before relying on it.
+   * Falls back to the plain ask() on any setup failure (not a real TTY, setRawMode missing, etc).
+   */
+  const multilineAsk = (promptText) => {
+    if (!termMode || !opts.multiline || typeof stdin.setRawMode !== 'function') return ask(promptText);
+    const plainPrefix = stripAnsi(promptText).replace(/^\n/, '');
+    if (promptText.startsWith('\n')) stdout.write('\n');
+    return new Promise((resolve) => {
+      // readline (terminal: true) already put stdin into raw mode and keeps it there for the interface's whole
+      // life - toggling setRawMode ourselves would fight it. Instead, detach readline's own 'data' listener(s)
+      // while this editor is active and restore them verbatim on the way out, so stdin's actual mode never changes.
+      let editor, drawnRows = 1, settled = false;
+      const savedListeners = stdin.listeners('data');
+      const cleanup = () => {
+        if (settled) return; settled = true;
+        stdin.removeListener('data', onData);
+        for (const l of savedListeners) stdin.on('data', l);
+        rl.resume();
+      };
+      const draw = () => {
+        if (drawnRows > 1) stdout.write(`\x1b[${drawnRows - 1}A`);
+        stdout.write('\r\x1b[0J');
+        const frame = frameLines(editor, plainPrefix.length);
+        stdout.write(frame.map((l, i) => (i === 0 ? style.bold(plainPrefix) + l : l)).join('\n'));
+        drawnRows = frame.length;
+        const upFrom = drawnRows - 1 - editor.row;
+        if (upFrom > 0) stdout.write(`\x1b[${upFrom}A`);
+        const col = plainPrefix.length + editor.col;
+        stdout.write(col > 0 ? `\r\x1b[${col}C` : '\r');
+      };
+      const onData = (chunk) => {
+        const key = parseKey(chunk);
+        if (!key) return;
+        if (key.name === 'ctrl-c') { cleanup(); onInterrupt(); resolve(''); return; }
+        const r = editor.handleKey(key);
+        if (r) {
+          cleanup();
+          stdout.write('\n');
+          resolve(r.submit);   // the caller's own termMode history-append already covers this, same as plain ask()
+          return;
+        }
+        draw();
+      };
+      try {
+        editor = new LineEditor();
+        rl.pause();
+        for (const l of savedListeners) stdin.removeListener('data', l);
+        draw();
+        stdin.on('data', onData);
+      } catch { settled = true; for (const l of savedListeners) stdin.on('data', l); rl.resume(); ask(promptText).then(resolve); }
+    });
+  };
+
   if (!interactive) {
     const ex = await expandSlash(opts.prompt);
     if (ex.unknown) { stderr.write(`claudecraft: unknown command /${ex.unknown}\n`); await harness.sessionEnd('exit'); await closeMcp(); rl.close(); return 2; }
@@ -497,11 +565,11 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
   }
 
   slashNames.push(...skills.filter((x) => x.userInvocable).map((x) => x.name));
-  stdout.write(`${style.bold('rea')} ${style.dim(`(${model.modelName}, ${permissionMode}) in ${opts.cwd}`)}\n${style.dim('Type a request; /compact, /clear, /context, /resume, /memory, /skills, /mcp, /permissions, /agents, /exit.')}\n`);
+  stdout.write(`${style.bold('claudecraft')} ${style.dim(`(${model.modelName}, ${permissionMode}) in ${opts.cwd}`)}\n${style.dim('Type a request; /compact, /clear, /context, /resume, /memory, /skills, /mcp, /permissions, /agents, /exit.')}\n`);
   if (opts.prompt) { const ex = await expandSlash(opts.prompt); await turn(ex.prompt ?? opts.prompt); }
   for (;;) {
     let line;
-    try { line = await ask(`\n${style.bold('>')} `); } catch { break; } // stdin closed
+    try { line = await multilineAsk(`\n${style.bold('>')} `); } catch { break; } // stdin closed
     if (!line) continue;
     exitArmed = false;
     if (termMode) { try { mkdirSync(path.dirname(histFile), { recursive: true, mode: 0o700 }); appendFileSync(histFile, `${line}\n`, { mode: 0o600 }); } catch { /* history is best effort */ } }
@@ -582,7 +650,7 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
     }
     if (line === '/status') {
       const c = harness.contextStatus();
-      const rows = [['provider', `${opts.provider}${opts.baseURL ? ` @ ${opts.baseURL}` : ''}`], ['model', model.modelName], ['mode', harness.permissionMode], ['sandbox', sandboxOn ? `on (network ${sbCfg.network === 'deny' ? 'denied' : 'allowed'}${sbCfg.autoAllow === false ? ', no auto-approve' : ', auto-approves sandboxed commands'})` : 'off'], ['cwd', rules.cwd],
+      const rows = [['provider', `${opts.provider}${opts.baseURL ? ` @ ${opts.baseURL}` : ''}`], ['model', model.modelName], ['mode', harness.permissionMode], ['theme', theme], ['sandbox', sandboxOn ? `on (network ${sbCfg.network === 'deny' ? 'denied' : 'allowed'}${sbCfg.autoAllow === false ? ', no auto-approve' : ', auto-approves sandboxed commands'})` : 'off'], ['cwd', rules.cwd],
         ...(harness.activeWorktree ? [['worktree', `${harness.activeWorktree.path} (branch ${harness.activeWorktree.branch})`]] : []),
         ['session', store ? `${store.sessionId.slice(0, 8)} (${harness.messages.length} messages)` : 'not persisted'],
         ['context', `~${c.tokens} / ${c.window} tokens (${c.level})`],

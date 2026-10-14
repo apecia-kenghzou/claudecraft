@@ -1,7 +1,21 @@
 // Terminal UI building blocks. Pure where possible so they can be tested without a TTY.
 // Rich output is enabled only for a real terminal (see richEnabled); piped/CI output stays plain text.
 
-const CODES = { reset: 0, bold: 1, dim: 2, italic: 3, underline: 4, red: 31, green: 32, yellow: 33, blue: 34, magenta: 35, cyan: 36, gray: 90 };
+const STRUCTURAL_CODES = { bold: '1', dim: '2', italic: '3', underline: '4' };
+
+/**
+ * Color presets (own design - no bundle evidence for exact codes/palette). Each maps the same semantic role names
+ * (red/green/yellow/blue/magenta/cyan/gray) to SGR parameter(s), so call sites never change across themes.
+ * `mono` disables color entirely (null = don't wrap); `light` swaps `gray` from bright-black (invisible on many
+ * light-background terminals) to a plain dim modifier, which renders reasonably on either background.
+ */
+export const THEMES = {
+  dark: { red: '31', green: '32', yellow: '33', blue: '34', magenta: '35', cyan: '36', gray: '90' },
+  light: { red: '31', green: '32', yellow: '33', blue: '34', magenta: '35', cyan: '36', gray: '2' },
+  mono: { red: null, green: null, yellow: null, blue: null, magenta: null, cyan: null, gray: null },
+};
+export const THEME_NAMES = Object.keys(THEMES);
+export const resolveTheme = (name) => THEMES[name] ?? THEMES.dark;
 
 export function richEnabled({ stdout, env = process.env, plain = false }) {
   return Boolean(stdout?.isTTY) && !plain && !env.REA_PLAIN && env.TERM !== 'dumb';
@@ -11,10 +25,14 @@ export function colorEnabled({ stdout, env = process.env }) {
   return Boolean(stdout?.isTTY) && !env.NO_COLOR && env.TERM !== 'dumb';
 }
 
-/** style.red('x') etc.; identity functions when color is off. */
-export function createStyle(enabled) {
-  const wrap = (code) => (enabled ? (s) => `\x1b[${code}m${s}\x1b[0m` : (s) => String(s));
-  return Object.fromEntries(Object.entries(CODES).filter(([k]) => k !== 'reset').map(([k, v]) => [k, wrap(v)]));
+/** style.red('x') / style.bold('x') etc.; identity functions when color is off or (for a color role) the theme disables it. */
+export function createStyle(enabled, themeName = 'dark') {
+  const theme = resolveTheme(themeName);
+  const wrap = (code) => (enabled && code !== null ? (s) => `\x1b[${code}m${s}\x1b[0m` : (s) => String(s));
+  return {
+    ...Object.fromEntries(Object.entries(STRUCTURAL_CODES).map(([k, v]) => [k, wrap(v)])),
+    ...Object.fromEntries(Object.entries(theme).map(([k, v]) => [k, wrap(v)])),
+  };
 }
 
 export const stripAnsi = (s) => String(s).replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');

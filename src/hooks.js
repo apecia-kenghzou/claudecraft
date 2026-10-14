@@ -37,7 +37,7 @@ export function settingsSources(cwd, managedSettingsFile) {
 
 /** Merge hooks across sources and keep permission rules tagged with the source they came from. */
 export function loadSettings(cwd, { managedSettingsFile } = {}) {
-  const merged = { hooks: {}, permissionSources: [], defaultMode: undefined, sandbox: undefined };
+  const merged = { hooks: {}, permissionSources: [], defaultMode: undefined, sandbox: undefined, theme: undefined };
   const seen = new Set();   // userSettings and projectSettings can be the same file (e.g. HOME === cwd); don't double-merge it
   for (const [source, f] of settingsSources(cwd, managedSettingsFile)) {
     if (!existsSync(f) || seen.has(f)) continue;
@@ -46,6 +46,7 @@ export function loadSettings(cwd, { managedSettingsFile } = {}) {
     try { json = JSON.parse(readFileSync(f, 'utf8')); } catch (e) { throw new Error(`Invalid JSON in ${f}: ${e.message}`); }
     for (const [ev, list] of Object.entries(json.hooks ?? {})) (merged.hooks[ev] ??= []).push(...list);
     if (json.sandbox && typeof json.sandbox === 'object') merged.sandbox = { ...(merged.sandbox ?? {}), ...json.sandbox };
+    if (json.ui?.theme) merged.theme = json.ui.theme;   // later (more specific) sources win, same as defaultMode
     const p = json.permissions;
     if (p) {
       merged.permissionSources.push({ source, allow: p.allow ?? [], deny: p.deny ?? [], ask: p.ask ?? [], additionalDirectories: p.additionalDirectories ?? [] });

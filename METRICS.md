@@ -58,7 +58,7 @@ L0 located, L1 characterized (names/strings/events), L2 function-level read, L3 
 | MCP client | L3 | stdio + HTTP clients, tools/resources, approval, screening implemented; OAuth/SSE/WS/prompts not |
 | Skills (plugins not covered) | L3 | SKILL.md + commands, Skill tool, slash invocation implemented; plugins not |
 | Sandbox | L3 | macOS Seatbelt: write confinement, kernel-enforced read/edit denies, protected paths, network switch, auto-approve; Linux bubblewrap companion (bind-mount layering, own design, not live-tested); domain proxy not |
-| Terminal UI | L3 | lightweight (no Ink): spinner, diffs, dialog, footer, input editing; no full-screen/multi-line editor |
+| Terminal UI | L3 | lightweight (no Ink): spinner, diffs, dialog, footer, input editing, 3 themes, opt-in multi-line editor (bundle-evidenced newline conventions, unit-tested pure logic; raw-mode wiring unverified on a real pty here); no full-screen layout/mouse |
 | Worktrees / StructuredOutput / ToolSearch | L3 | real git plumbing, live cwd switch, schema-forced output, deferred-tool loading; all live-verified on gpt-5.5 |
 | LSP (code intelligence) | L3 | real Content-Length wire client, 5 actions, symbol-based positioning, diagnostics; live-verified against real clangd |
 | NotebookRead / NotebookEdit | L3 | read/replace/insert/delete cells, fallback ids, Read/Edit permission aliasing; MultiEdit not built; live-verified on gpt-5.5 |
@@ -71,8 +71,8 @@ Counts: L3 = 17, L2 = 4, L1 = 0, L0 = 0 of 21 subsystems.
 
 ## 5. Project health
 
-- Tests: **267** across 27 files (`npm test`).
-- Source files: 33 (zero runtime dependencies).
+- Tests: **276** across 28 files (`npm test`).
+- Source files: 34 (zero runtime dependencies).
 - Live-validated (2026-10-13 to 2026-10-14, gpt-5.5 via an OpenAI-compatible endpoint): tool loop, Write/Read/Edit/Bash, parallel
   Explore subagents, auto-compaction with recall afterwards, resume across compaction boundaries, real MCP server (official
   filesystem server), hook commands, the terminal UI in a pty, plan mode, web tools, a ~40-request build session with resume and

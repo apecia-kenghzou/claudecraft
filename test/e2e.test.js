@@ -538,6 +538,28 @@ test('WebFetch and WebSearch end to end (local servers): private-address guard, 
   } finally { web.close(); }
 });
 
+test('--theme: flag/env/settings precedence, /status shows it, an invalid name is rejected', async () => {
+  const cwd = tmp();
+  await withMock([reply({ type: 'text', text: 'hi' })], async (baseURL) => {
+    const r = await runRea(['--theme', 'light'], { cwd, baseURL, stdin: '/status\n/exit\n' });
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /theme\s+light/);
+
+    const bad = await runRea(['--theme', 'nope'], { cwd, baseURL, stdin: '/exit\n' });
+    assert.equal(bad.code, 2);
+    assert.match(bad.err, /--theme must be one of dark, light, mono/);
+  });
+
+  mkdirSync(path.join(cwd, '.rea'));
+  writeFileSync(path.join(cwd, '.rea/settings.json'), JSON.stringify({ ui: { theme: 'mono' } }));
+  await withMock([reply({ type: 'text', text: 'hi' })], async (baseURL) => {
+    const fromSettings = await runRea([], { cwd, baseURL, stdin: '/status\n/exit\n' });
+    assert.match(fromSettings.out, /theme\s+mono/);                       // settings used when no flag/env
+    const flagWins = await runRea(['--theme', 'dark'], { cwd, baseURL, stdin: '/status\n/exit\n' });
+    assert.match(flagWins.out, /theme\s+dark/);                           // --theme beats settings
+  });
+});
+
 test('slash commands: /help /status /usage /model /export /diff, and tasks persist across --continue', async () => {
   const cwd = tmp();
   // run 1: model creates tasks
