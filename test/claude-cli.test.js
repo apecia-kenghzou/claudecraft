@@ -7,7 +7,7 @@ import path from 'node:path';
 import { buildArgs, mapEvent, runClaudeCli, summarizeTrace } from '../src/backends/claude-cli.js';
 
 const FAKE = path.resolve('test/fixtures/fake-claude.mjs');
-const BIN = path.resolve('bin/rea.js');
+const BIN = path.resolve('bin/claudecraft.js');
 async function collect(gen) { const ev = []; let s; while (!(s = await gen.next()).done) ev.push(s.value); return { ev, terminal: s.value }; }
 
 test('buildArgs: stream-json print mode, optional flags, session handling', () => {

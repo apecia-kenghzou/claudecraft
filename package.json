@@ -17,6 +17,6 @@
     "node": ">=18"
   },
   "bin": {
-    "claudecraft": "bin/rea.js"
+    "claudecraft": "bin/claudecraft.js"
   }
 }

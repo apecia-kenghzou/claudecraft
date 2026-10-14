@@ -60,7 +60,7 @@ Not published to npm yet — run it from a clone:
 
 ```sh
 git clone https://github.com/apecia-kenghzou/claudecraft.git
-cd claudecraft && npm link      # installs the `claudecraft` command locally (or just: node bin/rea.js)
+cd claudecraft && npm link      # installs the `claudecraft` command locally (or just: node bin/claudecraft.js)
 ```
 
 ```sh
@@ -77,7 +77,7 @@ claudecraft --provider openai --base-url http://localhost:8080/v1 --model your-m
 ## Architecture
 
 ```
-  CLI (bin/rea.js)
+  CLI (bin/claudecraft.js)
     │
     ├─ Harness ── the agent loop: model call → tool calls → permission check → hooks → compact?
     │     │
