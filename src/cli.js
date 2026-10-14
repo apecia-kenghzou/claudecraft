@@ -813,7 +813,11 @@ async function mainClaudeCli(opts, { stdin, stdout, stderr, env }) {
   };
   if (opts.print !== undefined) return run(opts.prompt);
 
-  const rl = createInterface({ input: stdin, terminal: Boolean(stdin.isTTY) });
+  const termMode = Boolean(stdin.isTTY);
+  const rl = createInterface({ input: stdin, terminal: termMode, ...(termMode ? { output: stdout } : {}) });
+  // In raw mode (termMode) the kernel no longer translates Ctrl+C into a real SIGINT - readline detects the byte
+  // itself and emits its own 'SIGINT' event instead, so that's what needs listening to here, same as the default path.
+  if (termMode) rl.on('SIGINT', () => ac.abort()); else process.on('SIGINT', () => ac.abort());
   stdout.write(`${style.bold('claudecraft')} ${style.dim(`(claude-cli backend, ${opts.permissionMode ?? 'default'}) in ${opts.cwd}`)}\nType a request; /exit to quit.\n`);
   let code = 0;
   if (opts.prompt) code = await run(opts.prompt);
