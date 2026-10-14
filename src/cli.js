@@ -771,13 +771,20 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
   return 0;
 }
 
-// Reference mode: Claude Code runs its own loop and tools; rea only relays events.
+// Reference mode: Claude Code runs its own loop and tools; claudecraft only relays events.
 async function mainClaudeCli(opts, { stdin, stdout, stderr, env }) {
+  const interactive = opts.print === undefined;
+  const rich = richEnabled({ stdout, env, plain: opts.plain });
+  const theme = opts.theme ?? env.REA_THEME ?? 'dark';
+  if (!THEME_NAMES.includes(theme)) { stderr.write(`claudecraft: --theme must be one of ${THEME_NAMES.join(', ')}\n`); return 2; }
+  const style = createStyle(rich && colorEnabled({ stdout, env }), theme);
+  const spinner = new Spinner(stdout, style, { enabled: rich && interactive });
   const ac = new AbortController();
   process.once('SIGINT', () => ac.abort());
   const sessionId = newSessionId();
   let turns = 0;
   const run = async (prompt) => {
+    spinner.start('Thinking');
     const gen = runClaudeCli({
       prompt, cwd: opts.cwd, model: opts.model, permissionMode: opts.permissionMode, signal: ac.signal, env,
       ...(turns === 0 ? { sessionId } : { resume: sessionId }),
@@ -786,31 +793,36 @@ async function mainClaudeCli(opts, { stdin, stdout, stderr, env }) {
     let step;
     while (!(step = await gen.next()).done) {
       const e = step.value;
+      spinner.stop();
       if (e.type === 'assistant') {
         for (const b of e.content) {
           if (b.type === 'text' && b.text.trim()) stdout.write(`${b.text}\n`);
-          if (b.type === 'tool_use') stdout.write(`\n● ${b.name}(${preview(b.input)})\n`);
+          if (b.type === 'tool_use') { stdout.write(`\n${style.cyan('●')} ${style.bold(b.name)}${style.dim(`(${preview(b.input)})`)}\n`); spinner.start('Running'); }
         }
+        if (!e.content.some((b) => b.type === 'tool_use')) spinner.start('Thinking');
       } else if (e.type === 'tool_result') {
-        stdout.write(`  ⎿ ${e.result.is_error ? '✗ ' : ''}${preview(String(e.result.content).replace(/\s+/g, ' '), 140)}\n`);
-      } else if (e.type === 'error') stderr.write(`claudecraft: ${e.error.message}\n`);
+        const body = preview(String(e.result.content).replace(/\s+/g, ' '), 140);
+        stdout.write(`  ${style.dim('⎿')} ${e.result.is_error ? style.red(`✗ ${body}`) : style.dim(body)}\n`);
+        spinner.start('Thinking');
+      } else if (e.type === 'error') { stderr.write(`claudecraft: ${e.error.message}\n`); }
     }
+    spinner.stop();
     const t = step.value;
-    if (t.costUsd !== undefined) stderr.write(`claudecraft: [claude-cli] ${t.turns} turns, $${Number(t.costUsd).toFixed(4)}, ${t.durationMs ?? '?'}ms\n`);
+    if (t.costUsd !== undefined) stderr.write(`claudecraft: ${style.dim(`[claude-cli] ${t.turns} turns, $${Number(t.costUsd).toFixed(4)}, ${t.durationMs ?? '?'}ms`)}\n`);
     return t.reason === 'completed' ? 0 : 1;
   };
   if (opts.print !== undefined) return run(opts.prompt);
 
-  const rl = createInterface({ input: stdin, terminal: false });
-  stdout.write(`rea (claude-cli backend, ${opts.permissionMode ?? "default"}) in ${opts.cwd}\nType a request; /exit to quit.\n`);
+  const rl = createInterface({ input: stdin, terminal: Boolean(stdin.isTTY) });
+  stdout.write(`${style.bold('claudecraft')} ${style.dim(`(claude-cli backend, ${opts.permissionMode ?? 'default'}) in ${opts.cwd}`)}\nType a request; /exit to quit.\n`);
   let code = 0;
   if (opts.prompt) code = await run(opts.prompt);
-  stdout.write('\n> ');
+  stdout.write(`\n${style.bold('>')} `);
   for await (const line of rl) {
     const l = line.trim();
     if (l === '/exit' || l === '/quit') break;
     if (l) code = await run(l);
-    stdout.write('\n> ');
+    stdout.write(`\n${style.bold('>')} `);
   }
   return code;
 }
