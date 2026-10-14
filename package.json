@@ -1,0 +1,22 @@
+{
+  "name": "claudecraft",
+  "version": "0.26.0",
+  "type": "module",
+  "description": "An independent, open-source coding agent CLI built by reverse-engineering how Claude Code behaves.",
+  "main": "src/index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/apecia-kenghzou/claudecraft.git"
+  },
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "demo": "node examples/demo.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "claudecraft": "bin/rea.js"
+  }
+}
