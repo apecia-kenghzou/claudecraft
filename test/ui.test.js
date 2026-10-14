@@ -184,3 +184,9 @@ test('mentionQuery: finds the text after the last "@" at/before the cursor, null
   assert.equal(mentionQuery('@src then more', 14), null);       // cursor is past the mention; a space interrupted it
   assert.equal(mentionQuery('a@b @c', 3), 'b');                   // only the nearest "@" before the cursor counts
 });
+
+test('suggestSlashCommands: a custom "commands" list overrides the SLASH_COMMANDS default (reference-mode backend)', () => {
+  const minimal = [['exit', '', 'quit'], ['quit', '', 'alias for /exit']];
+  assert.deepEqual(suggestSlashCommands('/ex', { commands: minimal }), [{ command: '/exit', description: 'quit' }]);
+  assert.deepEqual(suggestSlashCommands('/stat', { commands: minimal }), []);   // /status isn't in the minimal list
+});

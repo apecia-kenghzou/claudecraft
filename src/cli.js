@@ -143,6 +143,141 @@ export function parseArgs(argv) {
 
 const preview = (v, n = 100) => { const s = typeof v === 'string' ? v : JSON.stringify(v); return s.length > n ? `${s.slice(0, n)}…` : s; };
 
+/**
+ * Opt-in (--multiline, or --fullscreen which implies it) raw-mode multi-line editor for the main prompt, shared
+ * between the default provider path and the --backend claude-cli reference mode (which has its own simpler REPL
+ * loop but deserves the same editing/dropdown UX, not a second copy of this logic). Every other prompt in the
+ * default path (permission dialogs, plan approval, questions) keeps using the plain `ask()`/readline path,
+ * unchanged. EVIDENCE.md §28/§29: newline conventions and the "/" and "@" live suggestion dropdowns are rea's
+ * own design built from a real but smaller product screenshot - no arrow-key selection within the dropdown yet,
+ * Tab accepts the top hit. The raw-byte wiring and screen redraw here has no automated test (no pty in CI), but
+ * has been verified against a real pty (python's pty.openpty) during development - see EVIDENCE.md §29 for two
+ * real bugs that verification caught.
+ * Returns the plain `ask` function unchanged when multiline/fullscreen isn't active or isn't possible (not a
+ * real TTY, setRawMode missing) - falls back to the plain ask() on any setup failure too.
+ */
+function createMultilineAsk({ stdin, stdout, rl, termMode, ask, style, cwd, onInterrupt, multiline, fullscreen, skills = [], commands }) {
+  if (!termMode || !(multiline || fullscreen) || typeof stdin.setRawMode !== 'function') return ask;
+  // Top-level entries of cwd for the "@" file-mention dropdown (own design: top-level only, no recursive/fuzzy
+  // search or gitignore-awareness yet - a known, documented limitation, not a silent one). Gathered once per
+  // process since the main loop re-enters this on every prompt; a renamed/added file won't show up until
+  // restart. Acceptable for a first version of a feature whose real-product counterpart does live indexing.
+  let fileCandidates = null;
+  const getFileCandidates = () => {
+    if (fileCandidates) return fileCandidates;
+    try { fileCandidates = readdirSync(cwd(), { withFileTypes: true }).map((e) => (e.isDirectory() ? `${e.name}/` : e.name)); }
+    catch { fileCandidates = []; }
+    return fileCandidates;
+  };
+  // --fullscreen: a VT scrolling region (DECSTBM) pins the input block to the bottom rows while composing a
+  // prompt, leaving the terminal's own scrollback working normally above it - see src/screen.js for why this
+  // approach was chosen over an alternate screen buffer. Only active while idle at the main prompt (not during a
+  // running turn, which still prints normally into the full scroll area): a deliberate, documented scope limit
+  // rather than retrofitting every existing stdout.write call site with footer-awareness.
+  let fullscreenActive = false;
+  if (fullscreen && termMode) {
+    process.on('exit', () => { if (fullscreenActive) { try { stdout.write(resetScrollRegion() + disableMouse()); } catch { /* exiting anyway */ } } });
+  }
+  return (promptText) => {
+    const plainPrefix = stripAnsi(promptText).replace(/^\n/, '');
+    if (!fullscreen && promptText.startsWith('\n')) stdout.write('\n');
+    const footerRows = 12;   // divider + up to a few input lines + divider + up to 8 suggestion rows + status
+    return new Promise((resolve) => {
+      // readline (terminal: true) already put stdin into raw mode and keeps it there for the interface's whole
+      // life - toggling setRawMode ourselves would fight it. Instead, detach readline's own 'data' listener(s)
+      // while this editor is active and restore them verbatim on the way out, so stdin's actual mode never changes.
+      let editor, drawnRows = 1, settled = false;
+      const savedListeners = stdin.listeners('data');
+      const cleanup = () => {
+        if (settled) return; settled = true;
+        stdin.removeListener('data', onData);
+        for (const l of savedListeners) stdin.on('data', l);
+        if (fullscreen) { stdout.write(resetScrollRegion() + disableMouse()); fullscreenActive = false; }
+      };
+      // Raw hit data for Tab-acceptance; formatted separately (formatSlashSuggestions/formatFileMentions) for display.
+      const currentHits = () => {
+        const line0 = editor.lines[editor.row];
+        if (editor.lines.length === 1 && line0.startsWith('/') && !line0.includes(' ')) {
+          return { kind: 'slash', hits: suggestSlashCommands(line0, { skills, ...(commands ? { commands } : {}) }) };
+        }
+        const q = mentionQuery(line0, editor.col);
+        if (q !== null) return { kind: 'mention', hits: suggestFileMentions(q, getFileCandidates()) };
+        return { kind: null, hits: [] };
+      };
+      const draw = () => {
+        const { kind, hits } = currentHits();
+        const suggestions = (kind === 'slash' ? formatSlashSuggestions(hits) : kind === 'mention' ? formatFileMentions(hits) : []).map((s) => style.dim(s));
+        const inputLines = frameLines(editor, plainPrefix.length);     // the editable content only, cursor math is relative to this
+        if (fullscreen) {
+          const rows = stdout.rows ?? 24;
+          const frame = buildInputFrame({ lines: inputLines, prompt: style.bold(plainPrefix), rule: style.dim('─'.repeat(Math.max(2, Math.min(stdout.columns ?? 80, 100)))), suggestions });
+          stdout.write(drawFooter({ rows, footerRows, lines: frame }));
+          stdout.write(footerCursorPosition({ rows, footerRows, editorRow: editor.row, editorCol: editor.col, prefixWidth: plainPrefix.length, headerRows: 1 }));   // headerRows: 1 - the top rule occupies the footer's first row
+          return;
+        }
+        // Inline mode: no reserved region, so redraw in place - move up to the top of what was last drawn, erase
+        // everything from there down, write the fresh frame, then move the cursor back up from the LAST line
+        // written (end of the suggestions, if any) to the editor's actual current line within inputLines.
+        const frame = buildInputFrame({ lines: inputLines, prompt: style.bold(plainPrefix), suggestions });
+        if (drawnRows > 1) stdout.write(`\x1b[${drawnRows - 1}A`);
+        stdout.write('\r\x1b[0J');
+        stdout.write(frame.join('\n'));
+        drawnRows = frame.length;
+        const upFromLastLine = (frame.length - 1) - editor.row;
+        if (upFromLastLine > 0) stdout.write(`\x1b[${upFromLastLine}A`);
+        const col = plainPrefix.length + editor.col;
+        stdout.write(col > 0 ? `\r\x1b[${col}C` : '\r');
+      };
+      const onData = (chunk) => {
+        const mouse = fullscreen ? parseMouseEvent(chunk) : null;
+        if (mouse) {
+          const line0 = editor.lines[0];
+          const col = mouseToEditorColumn(mouse, { rows: stdout.rows ?? 24, footerRows, prefixWidth: plainPrefix.length, lineLength: line0.length, headerRows: 1 });
+          if (col !== null) { editor.row = 0; editor.col = col; draw(); }
+          return;
+        }
+        const key = parseKey(chunk);
+        if (!key) return;
+        if (key.name === 'ctrl-c') { cleanup(); onInterrupt(); resolve(''); return; }
+        if (key.name === 'tab') {
+          const { kind, hits } = currentHits();
+          const line0 = editor.lines[0];
+          if (kind === 'slash' && hits.length) {
+            const cmd = hits[0].command.split(' ')[0];           // drop any "[usage]"/"<usage>" suffix shown alongside it
+            editor.lines[0] = `${cmd} `;
+            editor.col = editor.lines[0].length;
+            draw();
+          } else if (kind === 'mention' && hits.length) {
+            const at = line0.lastIndexOf('@', editor.col - 1);
+            editor.lines[0] = line0.slice(0, at + 1) + hits[0] + line0.slice(editor.col);
+            editor.col = at + 1 + hits[0].length;
+            draw();
+          }
+          return;
+        }
+        const r = editor.handleKey(key);
+        if (r) {
+          cleanup();
+          stdout.write('\n');
+          resolve(r.submit);   // the caller's own termMode history-append already covers this, same as plain ask()
+          return;
+        }
+        draw();
+      };
+      try {
+        editor = new LineEditor();
+        // Deliberately NOT calling rl.pause(): doing so on a real TTY-backed readline interface was found (via a
+        // real pty, not just reasoning about it) to break the underlying terminal for further writes entirely -
+        // not just for this editor, for anything. Detaching readline's 'data' listener is sufficient on its own.
+        for (const l of savedListeners) stdin.removeListener('data', l);
+        if (fullscreen) { stdout.write(setScrollRegion(stdout.rows ?? 24, footerRows) + enableMouse()); fullscreenActive = true; }
+        draw();
+        stdin.on('data', onData);
+      } catch { settled = true; for (const l of savedListeners) stdin.on('data', l); if (fullscreen) { stdout.write(resetScrollRegion() + disableMouse()); fullscreenActive = false; } ask(promptText).then(resolve); }
+    });
+  };
+}
+
 export async function main(argv, { stdin = process.stdin, stdout = process.stdout, stderr = process.stderr, env = process.env } = {}) {
   let opts;
   try { opts = parseArgs(argv); } catch (e) { stderr.write(`claudecraft: ${e.message}\n`); return 2; }
@@ -500,137 +635,10 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
   };
   if (termMode) rl.on('SIGINT', onInterrupt); else process.on('SIGINT', onInterrupt);
 
-  // Top-level entries of cwd for the "@" file-mention dropdown (own design: top-level only, no recursive/fuzzy
-  // search or gitignore-awareness yet - a known, documented limitation, not a silent one). Gathered once per
-  // process since the main loop re-enters multilineAsk on every prompt; a renamed/added file won't show up until
-  // restart. Acceptable for a first version of a feature whose real-product counterpart does live indexing.
-  let fileCandidates = null;
-  const getFileCandidates = () => {
-    if (fileCandidates) return fileCandidates;
-    try { fileCandidates = readdirSync(rules.cwd, { withFileTypes: true }).map((e) => (e.isDirectory() ? `${e.name}/` : e.name)); }
-    catch { fileCandidates = []; }
-    return fileCandidates;
-  };
-
-  // --fullscreen: a VT scrolling region (DECSTBM) pins the input block to the bottom rows while composing a
-  // prompt, leaving the terminal's own scrollback working normally above it - see src/screen.js for why this
-  // approach was chosen over an alternate screen buffer. Only active while idle at the main prompt (not during a
-  // running turn, which still prints normally into the full scroll area): a deliberate, documented scope limit
-  // rather than retrofitting every existing stdout.write call site with footer-awareness.
-  let fullscreenActive = false;
-  if (opts.fullscreen && termMode) {
-    process.on('exit', () => { if (fullscreenActive) { try { stdout.write(resetScrollRegion() + disableMouse()); } catch { /* exiting anyway */ } } });
-  }
-
-  /**
-   * Opt-in (--multiline, or --fullscreen which implies it) raw-mode multi-line editor for the main prompt only;
-   * every other prompt (permission dialogs, plan approval, questions) keeps using the plain `ask()`/readline path
-   * above, unchanged. EVIDENCE.md §28/§29: newline conventions and the "/" and "@" live suggestion dropdowns are
-   * rea's own design built from a real but smaller product screenshot - no arrow-key selection within the
-   * dropdown yet, Tab accepts the top hit. This function is the raw-byte wiring and screen redraw, which has no
-   * automated test (no pty in this environment) - verify by hand before relying on it.
-   * Falls back to the plain ask() on any setup failure (not a real TTY, setRawMode missing, etc).
-   */
-  const multilineAsk = (promptText) => {
-    if (!termMode || !(opts.multiline || opts.fullscreen) || typeof stdin.setRawMode !== 'function') return ask(promptText);
-    const plainPrefix = stripAnsi(promptText).replace(/^\n/, '');
-    if (!opts.fullscreen && promptText.startsWith('\n')) stdout.write('\n');
-    const fullscreen = Boolean(opts.fullscreen);
-    const footerRows = 12;   // divider + up to a few input lines + divider + up to 8 suggestion rows + status
-    return new Promise((resolve) => {
-      // readline (terminal: true) already put stdin into raw mode and keeps it there for the interface's whole
-      // life - toggling setRawMode ourselves would fight it. Instead, detach readline's own 'data' listener(s)
-      // while this editor is active and restore them verbatim on the way out, so stdin's actual mode never changes.
-      let editor, drawnRows = 1, settled = false;
-      const savedListeners = stdin.listeners('data');
-      const cleanup = () => {
-        if (settled) return; settled = true;
-        stdin.removeListener('data', onData);
-        for (const l of savedListeners) stdin.on('data', l);
-        if (fullscreen) { stdout.write(resetScrollRegion() + disableMouse()); fullscreenActive = false; }
-      };
-      // Raw hit data for Tab-acceptance; formatted separately (formatSlashSuggestions/formatFileMentions) for display.
-      const currentHits = () => {
-        const line0 = editor.lines[editor.row];
-        if (editor.lines.length === 1 && line0.startsWith('/') && !line0.includes(' ')) {
-          return { kind: 'slash', hits: suggestSlashCommands(line0, { skills }) };
-        }
-        const q = mentionQuery(line0, editor.col);
-        if (q !== null) return { kind: 'mention', hits: suggestFileMentions(q, getFileCandidates()) };
-        return { kind: null, hits: [] };
-      };
-      const draw = () => {
-        const { kind, hits } = currentHits();
-        const suggestions = (kind === 'slash' ? formatSlashSuggestions(hits) : kind === 'mention' ? formatFileMentions(hits) : []).map((s) => style.dim(s));
-        const inputLines = frameLines(editor, plainPrefix.length);     // the editable content only, cursor math is relative to this
-        if (fullscreen) {
-          const rows = stdout.rows ?? 24;
-          const frame = buildInputFrame({ lines: inputLines, prompt: style.bold(plainPrefix), rule: style.dim('─'.repeat(Math.max(2, Math.min(stdout.columns ?? 80, 100)))), suggestions });
-          stdout.write(drawFooter({ rows, footerRows, lines: frame }));
-          stdout.write(footerCursorPosition({ rows, footerRows, editorRow: editor.row, editorCol: editor.col, prefixWidth: plainPrefix.length, headerRows: 1 }));   // headerRows: 1 - the top rule occupies the footer's first row
-          return;
-        }
-        // Inline mode: no reserved region, so redraw in place - move up to the top of what was last drawn, erase
-        // everything from there down, write the fresh frame, then move the cursor back up from the LAST line
-        // written (end of the suggestions, if any) to the editor's actual current line within inputLines.
-        const frame = buildInputFrame({ lines: inputLines, prompt: style.bold(plainPrefix), suggestions });
-        if (drawnRows > 1) stdout.write(`\x1b[${drawnRows - 1}A`);
-        stdout.write('\r\x1b[0J');
-        stdout.write(frame.join('\n'));
-        drawnRows = frame.length;
-        const upFromLastLine = (frame.length - 1) - editor.row;
-        if (upFromLastLine > 0) stdout.write(`\x1b[${upFromLastLine}A`);
-        const col = plainPrefix.length + editor.col;
-        stdout.write(col > 0 ? `\r\x1b[${col}C` : '\r');
-      };
-      const onData = (chunk) => {
-        const mouse = fullscreen ? parseMouseEvent(chunk) : null;
-        if (mouse) {
-          const line0 = editor.lines[0];
-          const col = mouseToEditorColumn(mouse, { rows: stdout.rows ?? 24, footerRows, prefixWidth: plainPrefix.length, lineLength: line0.length, headerRows: 1 });
-          if (col !== null) { editor.row = 0; editor.col = col; draw(); }
-          return;
-        }
-        const key = parseKey(chunk);
-        if (!key) return;
-        if (key.name === 'ctrl-c') { cleanup(); onInterrupt(); resolve(''); return; }
-        if (key.name === 'tab') {
-          const { kind, hits } = currentHits();
-          const line0 = editor.lines[0];
-          if (kind === 'slash' && hits.length) {
-            const cmd = hits[0].command.split(' ')[0];           // drop any "[usage]"/"<usage>" suffix shown alongside it
-            editor.lines[0] = `${cmd} `;
-            editor.col = editor.lines[0].length;
-            draw();
-          } else if (kind === 'mention' && hits.length) {
-            const at = line0.lastIndexOf('@', editor.col - 1);
-            editor.lines[0] = line0.slice(0, at + 1) + hits[0] + line0.slice(editor.col);
-            editor.col = at + 1 + hits[0].length;
-            draw();
-          }
-          return;
-        }
-        const r = editor.handleKey(key);
-        if (r) {
-          cleanup();
-          stdout.write('\n');
-          resolve(r.submit);   // the caller's own termMode history-append already covers this, same as plain ask()
-          return;
-        }
-        draw();
-      };
-      try {
-        editor = new LineEditor();
-        // Deliberately NOT calling rl.pause(): doing so on a real TTY-backed readline interface was found (via a
-        // real pty, not just reasoning about it) to break the underlying terminal for further writes entirely -
-        // not just for this editor, for anything. Detaching readline's 'data' listener is sufficient on its own.
-        for (const l of savedListeners) stdin.removeListener('data', l);
-        if (fullscreen) { stdout.write(setScrollRegion(stdout.rows ?? 24, footerRows) + enableMouse()); fullscreenActive = true; }
-        draw();
-        stdin.on('data', onData);
-      } catch { settled = true; for (const l of savedListeners) stdin.on('data', l); if (fullscreen) { stdout.write(resetScrollRegion() + disableMouse()); fullscreenActive = false; } ask(promptText).then(resolve); }
-    });
-  };
+  const multilineAsk = createMultilineAsk({
+    stdin, stdout, rl, termMode, ask, style, cwd: () => rules.cwd, onInterrupt,
+    multiline: opts.multiline, fullscreen: opts.fullscreen, skills,
+  });
 
   if (!interactive) {
     const ex = await expandSlash(opts.prompt);
@@ -905,15 +913,23 @@ async function mainClaudeCli(opts, { stdin, stdout, stderr, env }) {
   // In raw mode (termMode) the kernel no longer translates Ctrl+C into a real SIGINT - readline detects the byte
   // itself and emits its own 'SIGINT' event instead, so that's what needs listening to here, same as the default path.
   if (termMode) rl.on('SIGINT', onInterrupt); else process.on('SIGINT', onInterrupt);
+  // Only /exit and /quit are real commands in this reference-mode backend (Claude Code runs its own loop and
+  // slash commands; claudecraft only relays events) - the "/" dropdown must reflect that, not the full
+  // default-path command list, which would show commands that don't work here.
+  const ask = (promptText) => rl.question(promptText);
+  const multilineAsk = createMultilineAsk({
+    stdin, stdout, rl, termMode, ask, style, cwd: () => opts.cwd, onInterrupt,
+    multiline: opts.multiline, fullscreen: opts.fullscreen, commands: [['exit', '', 'quit'], ['quit', '', 'alias for /exit']],
+  });
   stdout.write(`${style.bold('claudecraft')} ${style.dim(`(claude-cli backend, ${opts.permissionMode ?? 'default'}) in ${opts.cwd}`)}\nType a request; /exit to quit.\n`);
   let code = 0;
   if (opts.prompt) code = await run(opts.prompt);
-  stdout.write(`\n${style.bold('>')} `);
-  for await (const line of rl) {
+  for (;;) {
+    let line;
+    try { line = await multilineAsk(`\n${style.bold('>')} `); } catch { break; }   // stdin closed
     const l = line.trim();
     if (l === '/exit' || l === '/quit') break;
     if (l) code = await run(l);
-    stdout.write(`\n${style.bold('>')} `);
   }
   return code;
 }

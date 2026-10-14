@@ -605,3 +605,20 @@ feature built from a screenshot of running behavior, not a protocol or loop sema
   it - clicks landed one row off, silently rejected as "not the input row" rather than mapping to the wrong
   column, which is exactly why a passive code read alone did not catch it. Fixed by giving both functions an
   explicit shared `headerRows` parameter instead of one of them special-casing a `+1` inline at the call site.
+
+## 30. --multiline/--fullscreen/--theme reach --backend claude-cli too (v0.29)
+Found via the user's own report ("i type / or @ nth shows up") after v0.28 shipped: the live suggestion
+dropdowns, mouse support and full-screen pinned input were built only into the default provider path's prompt
+loop, never wired into `--backend claude-cli`'s separate (and simpler) REPL loop - an honest oversight, not a
+bundle-evidence question (this entire area is rea's own design; see EVIDENCE.md §28/§29).
+Fixed by extracting the raw-mode editor (previously inline inside `main()`) into a standalone `createMultilineAsk()`
+factory function (`src/cli.js`, module scope), parameterized over everything that used to be a closure variable:
+`cwd` (a getter, since `main()`'s `rules.cwd` can change via `/cd` but `--backend claude-cli`'s is fixed),
+`ask`/`onInterrupt`/`style`/`rl`, and - importantly - `commands`: the live "/" dropdown must not offer the default
+path's ~26 commands to a backend that only actually implements `/exit`/`/quit` (`runClaudeCli` relays Claude Code's
+own loop; slash commands beyond those two are not rea's to answer here). `suggestSlashCommands()` (`src/ui.js`)
+gained an optional `commands` parameter (defaulting to the shared `SLASH_COMMANDS` table) specifically so this
+backend's dropdown could be scoped correctly without a second copy of the filtering logic.
+Both call sites (`main()` and `mainClaudeCli()`) now share one implementation; verified via the same real-pty
+method as §29, confirming `/ex` + Tab completes correctly and `/status` (a default-path-only command) correctly
+does not appear in this backend's dropdown.

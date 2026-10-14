@@ -71,7 +71,7 @@ Counts: L3 = 17, L2 = 4, L1 = 0, L0 = 0 of 21 subsystems.
 
 ## 5. Project health
 
-- Tests: **291** across 29 files (`npm test`).
+- Tests: **292** across 29 files (`npm test`).
 - Source files: 35 (zero runtime dependencies).
 - Live-validated (2026-10-13 to 2026-10-14, gpt-5.5 via an OpenAI-compatible endpoint): tool loop, Write/Read/Edit/Bash, parallel
   Explore subagents, auto-compaction with recall afterwards, resume across compaction boundaries, real MCP server (official

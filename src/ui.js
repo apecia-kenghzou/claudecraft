@@ -199,10 +199,10 @@ export const SLASH_COMMANDS = [
  * `limit` {command, description} pairs whose name starts with the typed prefix, plus any matching skills passed
  * in (skills have no built-in description table, so their description is whatever the caller supplies).
  */
-export function suggestSlashCommands(prefix, { skills = [], limit = 8 } = {}) {
+export function suggestSlashCommands(prefix, { skills = [], limit = 8, commands = SLASH_COMMANDS } = {}) {
   if (!prefix.startsWith('/') || prefix.includes(' ')) return [];
   const typed = prefix.slice(1).toLowerCase();
-  const builtins = SLASH_COMMANDS.filter(([name]) => name.toLowerCase().startsWith(typed))
+  const builtins = commands.filter(([name]) => name.toLowerCase().startsWith(typed))
     .map(([name, usage, description]) => ({ command: `/${name}${usage ? ` ${usage}` : ''}`, description }));
   const skillHits = skills.filter((s) => s.name.toLowerCase().startsWith(typed))
     .map((s) => ({ command: `/${s.name}`, description: s.description ?? '' }));
