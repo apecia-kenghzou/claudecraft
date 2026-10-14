@@ -77,9 +77,10 @@ Options:
                               input across lines; Enter submits, ctrl+j / shift+enter (where the terminal reports
                               it) / a trailing "\" add a newline instead. Experimental - not verified on every
                               terminal; falls back to plain input if the editor fails to start
-  --fullscreen                pins the multi-line input to the bottom of the terminal (a VT scrolling region,
-                              not an alternate screen - your normal scrollback keeps working); also enables mouse
-                              click-to-position-cursor in the input. Implies --multiline. Experimental, same caveat
+  --no-fullscreen              disable --fullscreen (on by default in a real terminal): pins the multi-line
+                              input to the bottom (a VT scrolling region, not an alternate screen - your normal
+                              scrollback keeps working), with mouse click-to-position-cursor and live "/"/"@"
+                              suggestion dropdowns. Implies --multiline. Experimental, same caveat as --multiline
   --max-turns <n>             default: 25
   --cwd <dir>                 working directory
   -h, --help
@@ -91,7 +92,7 @@ Settings: ~/.rea/settings.json, .rea/settings.json, .rea/settings.local.json
 `;
 
 export function parseArgs(argv) {
-  const o = { permissionMode: undefined, allowedTools: [], disallowedTools: [], mcpConfig: [], maxTurns: 25, cwd: process.cwd(), model: process.env.REA_MODEL };
+  const o = { permissionMode: undefined, allowedTools: [], disallowedTools: [], mcpConfig: [], maxTurns: 25, cwd: process.cwd(), model: process.env.REA_MODEL, fullscreen: true };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -114,6 +115,7 @@ export function parseArgs(argv) {
     else if (a === '--theme') o.theme = val();
     else if (a === '--multiline') o.multiline = true;
     else if (a === '--fullscreen') o.fullscreen = true;
+    else if (a === '--no-fullscreen') o.fullscreen = false;
     else if (a === '--sandbox') o.sandbox = true;
     else if (a === '--no-sandbox') o.sandbox = false;
     else if (a === '--sandbox-network') o.sandboxNetwork = val();

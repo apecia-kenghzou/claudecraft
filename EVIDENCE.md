@@ -622,3 +622,10 @@ backend's dropdown could be scoped correctly without a second copy of the filter
 Both call sites (`main()` and `mainClaudeCli()`) now share one implementation; verified via the same real-pty
 method as §29, confirming `/ex` + Tab completes correctly and `/status` (a default-path-only command) correctly
 does not appear in this backend's dropdown.
+
+## 31. --fullscreen is now the default (v0.30)
+At the user's request. `--no-fullscreen` opts back out to the plain scrollback prompt (what `--multiline` alone
+still gives, without the pinned footer/mouse/dropdowns). Since `termMode` already gates all of this on a real TTY
+(`stdin.isTTY`), defaulting `fullscreen: true` in `parseArgs()` changes nothing for any piped/non-interactive use
+(print mode, tests, CI) - verified via a real pty both ways: a bare invocation with no flags now sets the VT
+scroll region and enables mouse reporting; `--no-fullscreen` suppresses both.
