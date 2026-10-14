@@ -102,9 +102,11 @@ claudecraft --provider openai --base-url http://localhost:8080/v1 --model your-m
 - **Context compaction** that survives repeated compactions without losing the original task or re-attaching the wrong
   files.
 - **MCP client** — stdio and HTTP servers, resource tools, and user-input elicitation mid-call.
-- **Terminal UI** — 3 color themes (`--theme dark|light|mono`) and an opt-in (`--multiline`) multi-line input editor
-  (arrow keys move within the input across lines; Enter submits, `ctrl+j`/a trailing `\` add a newline instead).
-  Experimental — not verified against every terminal, hence opt-in.
+- **Terminal UI** — 3 color themes (`--theme dark|light|mono`); `--multiline` for a multi-line input editor (arrow
+  keys move within the input across lines; Enter submits, `ctrl+j`/a trailing `\` add a newline instead); `--fullscreen`
+  pins that input to the bottom of the terminal (your scrollback keeps working normally above it) with mouse
+  click-to-position-cursor and live `/` command and `@` file-mention suggestion dropdowns as you type. Verified
+  against a real pty.
 - **Git worktree isolation, structured output, lazy (deferred) tool loading, a real LSP client, Jupyter notebook
   editing, hooks (including a real file watcher and MCP elicitation)** — flag-level detail for every feature is in
   [ARCHITECTURE.md](ARCHITECTURE.md) (what's built, per subsystem) and [EVIDENCE.md](EVIDENCE.md) (exactly how).

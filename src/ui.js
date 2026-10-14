@@ -174,6 +174,92 @@ export function footerLine({ model, mode, status, compactions = 0, style, width 
   return style.dim(`──${text}${rule}`);
 }
 
+/**
+ * Single source of truth for slash-command names + descriptions, shared by /help and the live suggestion
+ * dropdown (suggestSlashCommands) so the two never drift apart. `name` has no leading slash; `usage` (if any)
+ * and `description` match the wording /help has always shown.
+ */
+export const SLASH_COMMANDS = [
+  ['help', '', 'this list'], ['model', '[name]', 'show or switch the model'], ['status', '', 'session, model, context, servers'],
+  ['usage', '', 'token usage this session'], ['tasks', '', 'the task checklist'], ['context', '', 'context window use'],
+  ['compact', '[focus]', 'summarize history to free context'], ['clear', '', 'start a new conversation'], ['resume', '[id]', 'list or load a saved session'],
+  ['fork', '[title]', 'branch the session: new id, same history so far'],
+  ['plan', '[off]', 'enter or leave plan mode (read-only until you approve)'], ['export', '[file]', 'write the conversation as Markdown'],
+  ['diff', '', 'git diff of the working directory'], ['init', '', 'have the model write REA.md for this project'],
+  ['memory', '', 'loaded memory files'], ['skills', '', 'available skills'], ['mcp', '', 'MCP servers'], ['lsp', '', 'language server status'],
+  ['sandbox', '', 'OS sandbox status'], ['permissions', '', 'active permission rules'],
+  ['cd', '[dir]', 'show or change the working directory'], ['add-dir', '[dir]', 'list or add a workspace directory'],
+  ['rename', '<title>', 'rename the current session'], ['session', '', 'current session id, file and cwd'], ['config', '', 'settings sources and resolved values'],
+  ['agents', '', 'sub-agent types'], ['exit', '', 'quit'],
+];
+
+/**
+ * Live "/" suggestion list (own design - a smaller, read-only version of the dropdown real Claude Code shows:
+ * no arrow-key selection here, Tab-completion via slashCompleter already picks the best match). Returns up to
+ * `limit` {command, description} pairs whose name starts with the typed prefix, plus any matching skills passed
+ * in (skills have no built-in description table, so their description is whatever the caller supplies).
+ */
+export function suggestSlashCommands(prefix, { skills = [], limit = 8 } = {}) {
+  if (!prefix.startsWith('/') || prefix.includes(' ')) return [];
+  const typed = prefix.slice(1).toLowerCase();
+  const builtins = SLASH_COMMANDS.filter(([name]) => name.toLowerCase().startsWith(typed))
+    .map(([name, usage, description]) => ({ command: `/${name}${usage ? ` ${usage}` : ''}`, description }));
+  const skillHits = skills.filter((s) => s.name.toLowerCase().startsWith(typed))
+    .map((s) => ({ command: `/${s.name}`, description: s.description ?? '' }));
+  return [...skillHits, ...builtins].slice(0, limit);
+}
+
+/**
+ * Live "@" file-mention suggestion list (own design - a smaller version of the picker real Claude Code shows:
+ * top-level working-directory entries only, substring-filtered, no recursive/fuzzy search or git-ignore awareness
+ * yet). `candidates` are plain relative names (directories end in "/"); gathering them touches the filesystem,
+ * so that part stays in cli.js - this is just the pure filter.
+ */
+export function suggestFileMentions(query, candidates, { limit = 15 } = {}) {
+  const q = query.toLowerCase();
+  const hits = q ? candidates.filter((c) => c.toLowerCase().includes(q)) : candidates;
+  return hits.slice(0, limit);
+}
+
+/** Plain-text rows for the live "/" suggestion dropdown: one line per hit, command padded so descriptions line up. */
+export function formatSlashSuggestions(hits, { pad = 20 } = {}) {
+  return hits.map(({ command, description }) => `  ${command.padEnd(pad)} ${description}`);
+}
+
+/** Plain-text rows for the live "@" file-mention dropdown, matching the "+ name" marker shown in the real product. */
+export function formatFileMentions(hits) {
+  return hits.map((f) => `  + ${f}`);
+}
+
+/**
+ * Assembles the full pinned-input block as plain text lines: an optional top rule, the editor's own lines (with
+ * `prompt` prepended to the first one), an optional bottom rule, any live suggestion rows, then an optional status
+ * line. Pure composition - callers apply their own styling per returned line (e.g. dim the rules/status, bold the
+ * prompt) since this has no opinion on color.
+ */
+export function buildInputFrame({ lines, prompt = '', rule, suggestions = [], status }) {
+  const out = [];
+  if (rule) out.push(rule);
+  out.push(...lines.map((l, i) => (i === 0 ? prompt + l : l)));
+  if (rule) out.push(rule);
+  out.push(...suggestions);
+  if (status) out.push(status);
+  return out;
+}
+
+/**
+ * The "@" mention query in progress at `col` on `line`, if any: the text after the last unescaped "@" at or
+ * before the cursor, as long as nothing (no space) has interrupted it since. Returns null when there's no mention
+ * being typed right now (so the caller knows not to show the file picker).
+ */
+export function mentionQuery(line, col) {
+  const before = line.slice(0, col);
+  const at = before.lastIndexOf('@');
+  if (at === -1) return null;
+  const query = before.slice(at + 1);
+  return query.includes(' ') ? null : query;
+}
+
 export function slashCompleter(names) {
   const all = names.map((n) => `/${n}`);
   return (line) => {

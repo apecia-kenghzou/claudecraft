@@ -58,7 +58,7 @@ L0 located, L1 characterized (names/strings/events), L2 function-level read, L3 
 | MCP client | L3 | stdio + HTTP clients, tools/resources, approval, screening implemented; OAuth/SSE/WS/prompts not |
 | Skills (plugins not covered) | L3 | SKILL.md + commands, Skill tool, slash invocation implemented; plugins not |
 | Sandbox | L3 | macOS Seatbelt: write confinement, kernel-enforced read/edit denies, protected paths, network switch, auto-approve; Linux bubblewrap companion (bind-mount layering, own design, not live-tested); domain proxy not |
-| Terminal UI | L3 | lightweight (no Ink): spinner, diffs, dialog, footer, input editing, 3 themes, opt-in multi-line editor (bundle-evidenced newline conventions, unit-tested pure logic; raw-mode wiring unverified on a real pty here); no full-screen layout/mouse |
+| Terminal UI | L3 | lightweight (no Ink): spinner, diffs, dialog, footer, input editing, 3 themes, multi-line editor, --fullscreen pinned input (VT scroll region) with mouse + live /+@ dropdowns, verified against a real pty (two real bugs found/fixed that way); no arrow-key dropdown selection, no recursive @ search |
 | Worktrees / StructuredOutput / ToolSearch | L3 | real git plumbing, live cwd switch, schema-forced output, deferred-tool loading; all live-verified on gpt-5.5 |
 | LSP (code intelligence) | L3 | real Content-Length wire client, 5 actions, symbol-based positioning, diagnostics; live-verified against real clangd |
 | NotebookRead / NotebookEdit | L3 | read/replace/insert/delete cells, fallback ids, Read/Edit permission aliasing; MultiEdit not built; live-verified on gpt-5.5 |
@@ -71,13 +71,16 @@ Counts: L3 = 17, L2 = 4, L1 = 0, L0 = 0 of 21 subsystems.
 
 ## 5. Project health
 
-- Tests: **276** across 28 files (`npm test`).
-- Source files: 34 (zero runtime dependencies).
+- Tests: **291** across 29 files (`npm test`).
+- Source files: 35 (zero runtime dependencies).
 - Live-validated (2026-10-13 to 2026-10-14, gpt-5.5 via an OpenAI-compatible endpoint): tool loop, Write/Read/Edit/Bash, parallel
   Explore subagents, auto-compaction with recall afterwards, resume across compaction boundaries, real MCP server (official
   filesystem server), hook commands, the terminal UI in a pty, plan mode, web tools, a ~40-request build session with resume and
   repeated compactions, the OS sandbox (real sandbox-exec confinement), git worktree isolation, structured output, ToolSearch
   unlocking a deferred real MCP tool, the LSP tool against real clangd (definition/hover/documentSymbol/diagnostics), and
-  NotebookRead/NotebookEdit (cell replace + insert, written back as valid nbformat JSON). Mock-only: Anthropic API client,
-  Anthropic prompt caching, MCP over HTTP.
+  NotebookRead/NotebookEdit (cell replace + insert, written back as valid nbformat JSON), and (2026-10-14) the --multiline
+  editor, --fullscreen pinned input, mouse click-to-position, and the live "/" and "@" suggestion dropdowns against a real
+  pty (python pty.openpty, not just piped stdio) - this found and fixed two real bugs (rl.pause() breaking the terminal;
+  a mouse-click row off-by-one) that code review alone had not caught. Mock-only: Anthropic API client, Anthropic prompt
+  caching, MCP over HTTP.
 

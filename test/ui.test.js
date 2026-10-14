@@ -121,3 +121,66 @@ test('path shortening for display only; Write preview drops the trailing blank l
   const w = toolPreview({ name: 'Write', input: { content: 'a\nb\n' } }, createStyle(false));
   assert.deepEqual(w, ['+ a', '+ b']);
 });
+
+import { suggestSlashCommands, suggestFileMentions, SLASH_COMMANDS } from '../src/ui.js';
+
+test('suggestSlashCommands: filters built-ins by prefix, includes matching skills first, bare input yields nothing', () => {
+  assert.deepEqual(suggestSlashCommands('hi'), []);                            // no leading "/"
+  assert.deepEqual(suggestSlashCommands('/status x'), []);                     // already has an argument: not a command prefix anymore
+  const statusOnly = suggestSlashCommands('/stat');
+  assert.deepEqual(statusOnly, [{ command: '/status', description: 'session, model, context, servers' }]);
+  const compactHits = suggestSlashCommands('/c');
+  assert.ok(compactHits.some((h) => h.command === '/compact [focus]'));
+  assert.ok(compactHits.some((h) => h.command === '/clear'));
+  assert.ok(compactHits.some((h) => h.command === '/cd [dir]'));
+  const withSkill = suggestSlashCommands('/g', { skills: [{ name: 'greet', description: 'say hi' }] });
+  assert.equal(withSkill[0].command, '/greet');                                // a matching skill is listed too
+  assert.equal(withSkill[0].description, 'say hi');
+});
+
+test('suggestSlashCommands: a matching skill is listed ahead of built-ins, limit is respected', () => {
+  const hits = suggestSlashCommands('/c', { skills: [{ name: 'commit-helper', description: 'writes commit messages' }], limit: 2 });
+  assert.equal(hits.length, 2);
+  assert.equal(hits[0].command, '/commit-helper');
+  assert.equal(hits[0].description, 'writes commit messages');
+});
+
+test('suggestSlashCommands: SLASH_COMMANDS covers /help\'s own list (no drift between the two)', () => {
+  assert.ok(SLASH_COMMANDS.some(([name]) => name === 'help'));
+  assert.ok(SLASH_COMMANDS.some(([name]) => name === 'exit'));
+  assert.equal(SLASH_COMMANDS.filter(([name]) => name === 'status').length, 1);
+});
+
+test('suggestFileMentions: substring match, directories distinguishable by trailing slash, limit respected', () => {
+  const candidates = ['src/', 'test/', 'README.md', 'package.json', 'METRICS.md'];
+  assert.deepEqual(suggestFileMentions('', candidates), candidates);
+  assert.deepEqual(suggestFileMentions('md', candidates), ['README.md', 'METRICS.md']);
+  assert.deepEqual(suggestFileMentions('src', candidates), ['src/']);
+  assert.equal(suggestFileMentions('', candidates, { limit: 2 }).length, 2);
+});
+
+import { formatSlashSuggestions, formatFileMentions, buildInputFrame } from '../src/ui.js';
+
+test('formatSlashSuggestions / formatFileMentions: plain-text rows, command padded so descriptions line up', () => {
+  assert.deepEqual(formatSlashSuggestions([{ command: '/status', description: 'session info' }], { pad: 10 }), ['  /status    session info']);
+  assert.deepEqual(formatFileMentions(['src/', 'README.md']), ['  + src/', '  + README.md']);
+});
+
+test('buildInputFrame: rules bracket the input, prompt only prepends to the first line, suggestions/status appended', () => {
+  const frame = buildInputFrame({
+    lines: ['hello', 'world'], prompt: '> ', rule: '---', suggestions: ['  /status  ...'], status: 'footer',
+  });
+  assert.deepEqual(frame, ['---', '> hello', 'world', '---', '  /status  ...', 'footer']);
+  const bare = buildInputFrame({ lines: ['hi'] });
+  assert.deepEqual(bare, ['hi']);
+});
+
+import { mentionQuery } from '../src/ui.js';
+
+test('mentionQuery: finds the text after the last "@" at/before the cursor, null once a space interrupts it', () => {
+  assert.equal(mentionQuery('look at @src', 12), 'src');
+  assert.equal(mentionQuery('look at @', 9), '');
+  assert.equal(mentionQuery('no mention here', 10), null);
+  assert.equal(mentionQuery('@src then more', 14), null);       // cursor is past the mention; a space interrupted it
+  assert.equal(mentionQuery('a@b @c', 3), 'b');                   // only the nearest "@" before the cursor counts
+});

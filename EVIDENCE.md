@@ -565,3 +565,43 @@ sought (out of scope - this is a visual-polish feature, not a loop/protocol beha
 (`src/ui.js`) now takes a theme name and keeps the same semantic role names (`red`/`green`/.../`gray`,
 `bold`/`dim`/`italic`/`underline`) across all three presets, so no call site in `cli.js` had to change.
 `--theme`, `REA_THEME`, and `{"ui":{"theme":...}}` in settings resolve in that precedence order.
+
+## 29. Full-screen pinned input, mouse, live "/" and "@" suggestion dropdowns (v0.28)
+Prompted by the user pointing out three screenshots of the real product's TUI mid-session: a pinned input box with
+divider lines above/below it and a status footer; a live "/" command dropdown (filtered list + descriptions,
+updating per keystroke); a live "@" file-mention picker (directory listing with a "+" marker). Own design
+throughout - no bundle evidence was sought for exact rendering/layout (out of scope: this is a visual-polish
+feature built from a screenshot of running behavior, not a protocol or loop semantic), except where noted:
+
+- **Full-screen layout** (`--fullscreen`, `src/screen.js`): NOT the alternate-screen-buffer approach
+  (`\x1b[?1049h`) the real product's Ink/React app almost certainly uses - that would require every one of the
+  dozens of existing `stdout.write` call sites throughout the turn-handling code to go through a redraw-aware
+  layer. Instead, a VT scrolling region (DECSTBM, `CSI r`) confines normal scrollback to the top rows and pins the
+  last `footerRows` rows as a separately-drawn area - the technique vim/tmux use for a status line, applied to an
+  input box. Deliberately scoped to be active only while idle at the main prompt, not during a running turn (which
+  still prints normally into the full scroll area) - a documented limit, not a silent one.
+- **Mouse** (click-to-position-cursor only): SGR extended mouse reporting (`CSI ?1000h` + `CSI ?1006h`), parsed in
+  `parseMouseEvent()`. Only a left-click on the footer's actual input row repositions the cursor; everything else
+  (scroll-wheel, right-click, other footer rows) is ignored rather than guessed. Scroll-wheel needs no handling at
+  all - DECSTBM leaves the terminal's own scrollback and mouse-wheel behavior completely intact above the pinned
+  region, which is part of why this approach was chosen over alternate-screen.
+- **Live "/" dropdown** (`suggestSlashCommands`/`formatSlashSuggestions` in `src/ui.js`): a smaller, read-only
+  version of what the screenshot showed - filters `SLASH_COMMANDS` (now the single source of truth `/help` also
+  reads from, so the two can't drift) plus matching skills, updates every keystroke. No arrow-key selection within
+  the dropdown; Tab accepts the top hit (reusing the same Tab-completion gesture, now dropdown-aware instead of
+  just readline's own completer).
+- **Live "@" file-mention dropdown** (`suggestFileMentions`/`formatFileMentions`): top-level working-directory
+  entries only (gathered once per process), substring-filtered. Not recursive, no fuzzy ranking, no `.gitignore`
+  awareness - a real, documented gap versus the live-indexed picker the screenshot showed, not a silent one.
+- **Found and fixed via real pty testing, not just reasoning about it**: calling `rl.pause()` on a real TTY-backed
+  `readline` interface (as the original multi-line-editor draft did, to stop it from double-processing keystrokes
+  alongside the custom raw-mode reader) broke the underlying terminal for *all* further writes - not just within
+  this feature, permanently, for the rest of the process. Confirmed by writing to the pty's master side from a
+  Python test harness and observing immediate `EIO` only after `rl.pause()` had run, never before, and never when
+  it was removed. Fixed by relying solely on detaching/reattaching readline's `'data'` listener (already the
+  mechanism that matters), with `rl.pause()`/`rl.resume()` removed entirely.
+- **Found and fixed via the same pty testing**: `footerCursorPosition()` and `mouseToEditorColumn()` initially
+  disagreed about which footer row holds the actual input line whenever a header row (the top divider) sits above
+  it - clicks landed one row off, silently rejected as "not the input row" rather than mapping to the wrong
+  column, which is exactly why a passive code read alone did not catch it. Fixed by giving both functions an
+  explicit shared `headerRows` parameter instead of one of them special-casing a `+1` inline at the call site.

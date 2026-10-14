@@ -141,8 +141,11 @@ p('  Explore subagents, auto-compaction with recall afterwards, resume across co
 p('  filesystem server), hook commands, the terminal UI in a pty, plan mode, web tools, a ~40-request build session with resume and');
 p('  repeated compactions, the OS sandbox (real sandbox-exec confinement), git worktree isolation, structured output, ToolSearch');
 p('  unlocking a deferred real MCP tool, the LSP tool against real clangd (definition/hover/documentSymbol/diagnostics), and');
-p('  NotebookRead/NotebookEdit (cell replace + insert, written back as valid nbformat JSON). Mock-only: Anthropic API client,');
-p('  Anthropic prompt caching, MCP over HTTP.');
+p('  NotebookRead/NotebookEdit (cell replace + insert, written back as valid nbformat JSON), and (2026-10-14) the --multiline');
+p('  editor, --fullscreen pinned input, mouse click-to-position, and the live "/" and "@" suggestion dropdowns against a real');
+p('  pty (python pty.openpty, not just piped stdio) - this found and fixed two real bugs (rl.pause() breaking the terminal;');
+p('  a mouse-click row off-by-one) that code review alone had not caught. Mock-only: Anthropic API client, Anthropic prompt');
+p('  caching, MCP over HTTP.');
 p();
 const out = lines.join('\n');
 console.log(out);

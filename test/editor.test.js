@@ -14,6 +14,7 @@ test('parseKey: control sequences, printable chars, pasted text, unknown bytes',
   assert.deepEqual(parseKey('\x05'), { name: 'end' });
   assert.deepEqual(parseKey('\x1b[13;2u'), { name: 'shift-enter' });
   assert.deepEqual(parseKey('\x03'), { name: 'ctrl-c' });
+  assert.deepEqual(parseKey('\t'), { name: 'tab' });
   assert.deepEqual(parseKey('a'), { name: 'char', char: 'a' });
   assert.deepEqual(parseKey('hello world'), { name: 'text', text: 'hello world' });   // multi-char paste
   assert.equal(parseKey('\x1b[99~'), null);                                           // unrecognized escape sequence

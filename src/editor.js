@@ -28,6 +28,7 @@ export function parseKey(chunk) {
   if (s === '\x15') return { name: 'kill-line' };         // Ctrl+U
   if (s === '\x1b[13;2u') return { name: 'shift-enter' }; // Kitty keyboard protocol, if the terminal sends it
   if (s === '\x03') return { name: 'ctrl-c' };
+  if (s === '\t') return { name: 'tab' };
   if (s.length === 1 && s >= ' ') return { name: 'char', char: s };
   if (!s.startsWith('\x1b') && [...s].every((c) => c >= ' ' || c === '\t')) return { name: 'text', text: s };  // paste
   return null;
