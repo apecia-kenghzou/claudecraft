@@ -680,9 +680,10 @@ and the `ctrl+s`/"chat:stash" shelving command - none of these were in the origi
 At the user's request, every user-facing and source occurrence of "ClaudeCraft"/"claudecraft" was renamed to
 "CodeCraft"/"codecraft" (`README.md`, `LICENSE`, `package.json`'s `name`/`bin` entry, `bin/claudecraft.js` ->
 `bin/codecraft.js`, every `stderr.write('claudecraft: ...')`-style message and banner in `src/cli.js`, and the two
-test files that spawn the binary by path). The GitHub remote itself (`apecia-kenghzou/claudecraft`) was not
-renamed - only this project's own branding - so `README.md`'s clone URL and `package.json`'s `repository.url`
-still point at the real (unrenamed) repo; only the locally-installed command name changed.
+test files that spawn the binary by path). The first push after this rename revealed the GitHub repo itself had
+already been renamed to `apecia-kenghzou/codecraft` independently (the old `.../claudecraft.git` remote still
+works - GitHub redirects it - but `README.md`'s clone URL and `package.json`'s `repository.url` were updated to
+the real current address rather than relying on the redirect).
 Deliberately not touched: the deeper "rea" namespace used throughout the codebase and predating "ClaudeCraft" -
 env vars (`REA_MODEL`, `REA_PROVIDER`, `REA_API_KEY`, `REA_THEME`, `REA_PLAIN`), the `~/.rea` settings/history
 directory, the `REA.md` memory file convention, and the `--help` banner's own "rea-code" usage line. That is a

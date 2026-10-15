@@ -59,8 +59,8 @@ notebook editing, and an OS sandbox (macOS Seatbelt + a Linux bubblewrap compani
 Not published to npm yet — run it from a clone:
 
 ```sh
-git clone https://github.com/apecia-kenghzou/claudecraft.git
-cd claudecraft && npm link      # installs the `codecraft` command locally (or just: node bin/codecraft.js)
+git clone https://github.com/apecia-kenghzou/codecraft.git
+cd codecraft && npm link      # installs the `codecraft` command locally (or just: node bin/codecraft.js)
 ```
 
 ```sh
