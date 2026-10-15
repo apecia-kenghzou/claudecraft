@@ -629,3 +629,14 @@ still gives, without the pinned footer/mouse/dropdowns). Since `termMode` alread
 (`stdin.isTTY`), defaulting `fullscreen: true` in `parseArgs()` changes nothing for any piped/non-interactive use
 (print mode, tests, CI) - verified via a real pty both ways: a bare invocation with no flags now sets the VT
 scroll region and enables mouse reporting; `--no-fullscreen` suppresses both.
+
+## 32. --fullscreen reverted to opt-in; --multiline is the default instead (v0.31)
+The default-on --fullscreen from §31 created a visible bug of its own: the scroll region and pinned footer were
+set up lazily on the *first* prompt (inside multilineAsk), which is after the banner had already printed at the
+top of a fresh, tall terminal - and the whole enable/disable cycle repeated on every turn rather than once per
+session. The result was a large, growing blank gap between the banner and the pinned input box, worse in taller
+terminal windows. At the user's request (and before attempting the real fix - properly hoisting the scroll-region
+setup to session start with the cursor anchored at the bottom row, done once, not per turn - was worth the extra
+risk for a cosmetic feature): `--fullscreen` is opt-in again, `--multiline` (the simpler, more-tested path - no
+scroll region, no mouse, no lazy/cyclical state) is on by default instead. `--no-multiline`/`--no-fullscreen` are
+both available to opt out of either. The underlying --fullscreen bug is not yet fixed, just no longer defaulted on.

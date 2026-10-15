@@ -73,14 +73,13 @@ Options:
   --lsp-config <file>          JSON {"servers":{".ext":{"command":...,"args":[...]}}}; merged over the built-in registry
   --plain                     no colors, spinner, diffs or line editing (also REA_PLAIN=1 / NO_COLOR)
   --theme <dark|light|mono>   color preset (default: dark; also REA_THEME or {"ui":{"theme":...}} in settings)
-  --multiline                 opt-in multi-line input editor for the main prompt: arrow keys move within the
-                              input across lines; Enter submits, ctrl+j / shift+enter (where the terminal reports
-                              it) / a trailing "\" add a newline instead. Experimental - not verified on every
-                              terminal; falls back to plain input if the editor fails to start
-  --no-fullscreen              disable --fullscreen (on by default in a real terminal): pins the multi-line
-                              input to the bottom (a VT scrolling region, not an alternate screen - your normal
-                              scrollback keeps working), with mouse click-to-position-cursor and live "/"/"@"
-                              suggestion dropdowns. Implies --multiline. Experimental, same caveat as --multiline
+  --no-multiline               disable the multi-line input editor (on by default in a real terminal): arrow keys
+                              move within the input across lines, live "/" and "@" suggestion dropdowns; Enter
+                              submits, ctrl+j / shift+enter (where the terminal reports it) / a trailing "\" add a
+                              newline instead. Falls back to plain input if the editor fails to start
+  --fullscreen                opt-in: also pins the input to the bottom of the terminal (a VT scrolling region)
+                              with mouse click-to-position-cursor. Off by default - more moving parts, more ways
+                              to go wrong on an unusual terminal; --multiline alone is the better-tested default
   --max-turns <n>             default: 25
   --cwd <dir>                 working directory
   -h, --help
@@ -92,7 +91,7 @@ Settings: ~/.rea/settings.json, .rea/settings.json, .rea/settings.local.json
 `;
 
 export function parseArgs(argv) {
-  const o = { permissionMode: undefined, allowedTools: [], disallowedTools: [], mcpConfig: [], maxTurns: 25, cwd: process.cwd(), model: process.env.REA_MODEL, fullscreen: true };
+  const o = { permissionMode: undefined, allowedTools: [], disallowedTools: [], mcpConfig: [], maxTurns: 25, cwd: process.cwd(), model: process.env.REA_MODEL, multiline: true, fullscreen: false };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -114,6 +113,7 @@ export function parseArgs(argv) {
     else if (a === '--plain') o.plain = true;
     else if (a === '--theme') o.theme = val();
     else if (a === '--multiline') o.multiline = true;
+    else if (a === '--no-multiline') o.multiline = false;
     else if (a === '--fullscreen') o.fullscreen = true;
     else if (a === '--no-fullscreen') o.fullscreen = false;
     else if (a === '--sandbox') o.sandbox = true;
