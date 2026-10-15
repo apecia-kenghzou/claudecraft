@@ -6,22 +6,22 @@
   <img src="https://img.shields.io/badge/status-experimental-blue?style=flat-square" alt="Experimental">
 </p>
 
-<h1 align="center">ClaudeCraft</h1>
+<h1 align="center">CodeCraft</h1>
 <p align="center"><b>An independent, open-source coding agent CLI, built by reverse-engineering how Claude Code behaves.</b></p>
 <p align="center"><i>Zero runtime dependencies. Works with Anthropic's API or any OpenAI-compatible endpoint.</i></p>
 
 > [!NOTE]
-> ClaudeCraft is an independent clean-room re-implementation, not a fork. It is built from *observed behavior* of the
+> CodeCraft is an independent clean-room re-implementation, not a fork. It is built from *observed behavior* of the
 > `@anthropic-ai/claude-code` CLI (tool names, hook payloads, permission rules, loop semantics) — never from its source
 > code or any copied strings/prompts. It is not affiliated with, endorsed by, or associated with Anthropic. See
-> [EVIDENCE.md](EVIDENCE.md) for exactly what was observed vs. what is ClaudeCraft's own design.
+> [EVIDENCE.md](EVIDENCE.md) for exactly what was observed vs. what is CodeCraft's own design.
 
 [What's ported](#whats-ported-and-whats-not) · [Quick start](#quick-start) · [Architecture](#architecture) ·
 [Features](#features) · [Permissions and sandbox](#permissions-and-sandbox) · [Tests](#tests) · [Docs](#project-docs)
 
 ## Why
 
-Claude Code is closed source. ClaudeCraft exists to answer, concretely and testably, "what does an agentic coding CLI
+Claude Code is closed source. CodeCraft exists to answer, concretely and testably, "what does an agentic coding CLI
 actually need to do under the hood?" — the tool-call loop, permission rules, sandboxing, context compaction, sessions,
 MCP, hooks — rebuilt from scratch, with a test for every behavior and a document tracking what's verified vs. guessed.
 
@@ -49,7 +49,7 @@ notebook editing, and an OS sandbox (macOS Seatbelt + a Linux bubblewrap compani
 - **`auto` permission mode** — described in the bundle as classifier-gated, but no reference classifier exists to port;
   building one means inventing the policy, not reverse-engineering it.
 - **Enterprise policy delivery** — remote/MDM settings push, `policyHelper` scripts, admin-only fields
-  (`autoUpdate`, `modelPricing`, provider allowlists). ClaudeCraft supports local managed-settings files only.
+  (`autoUpdate`, `modelPricing`, provider allowlists). CodeCraft supports local managed-settings files only.
 - **OAuth login to Anthropic's own consumer subscription** — intentionally refused; that flow is scoped to
   Anthropic's official client, and porting it means impersonating Claude Code to bypass that restriction.
 - **MCP OAuth, SSE/WebSocket transports, prompts** · **Plugins** · **Extended-thinking resume** · **Windows**.
@@ -60,24 +60,24 @@ Not published to npm yet — run it from a clone:
 
 ```sh
 git clone https://github.com/apecia-kenghzou/claudecraft.git
-cd claudecraft && npm link      # installs the `claudecraft` command locally (or just: node bin/claudecraft.js)
+cd claudecraft && npm link      # installs the `codecraft` command locally (or just: node bin/codecraft.js)
 ```
 
 ```sh
 # with Anthropic's API
 export ANTHROPIC_API_KEY=sk-ant-...
-claudecraft                                   # interactive
-claudecraft -p "list the TODOs in src/"       # one-shot
+codecraft                                   # interactive
+codecraft -p "list the TODOs in src/"       # one-shot
 
 # or with any OpenAI-compatible endpoint (local model server, proxy, etc.)
 export OPENAI_API_KEY=...
-claudecraft --provider openai --base-url http://localhost:8080/v1 --model your-model
+codecraft --provider openai --base-url http://localhost:8080/v1 --model your-model
 ```
 
 ## Architecture
 
 ```
-  CLI (bin/claudecraft.js)
+  CLI (bin/codecraft.js)
     │
     ├─ Harness ── the agent loop: model call → tool calls → permission check → hooks → compact?
     │     │
@@ -140,11 +140,11 @@ npm test
 
 ## Project docs
 
-- **[EVIDENCE.md](EVIDENCE.md)** — for every feature, what was directly observed in the real binary vs. ClaudeCraft's own design.
+- **[EVIDENCE.md](EVIDENCE.md)** — for every feature, what was directly observed in the real binary vs. CodeCraft's own design.
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — the subsystem-by-subsystem build log and what's left.
 - **[METRICS.md](METRICS.md)** — the coverage numbers above, regenerated from source, never hand-edited.
 
 ## License and credits
 
-MIT. ClaudeCraft is an independent project with no affiliation to Anthropic. "Claude" and "Claude Code" are trademarks
+MIT. CodeCraft is an independent project with no affiliation to Anthropic. "Claude" and "Claude Code" are trademarks
 of Anthropic, referenced here only to describe what this project reverse-engineers and re-implements.

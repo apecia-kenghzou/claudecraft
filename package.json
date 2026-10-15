@@ -1,6 +1,6 @@
 {
-  "name": "claudecraft",
-  "version": "0.31.0",
+  "name": "codecraft",
+  "version": "0.32.0",
   "type": "module",
   "description": "An independent, open-source coding agent CLI built by reverse-engineering how Claude Code behaves.",
   "main": "src/index.js",
@@ -17,6 +17,6 @@
     "node": ">=18"
   },
   "bin": {
-    "claudecraft": "bin/claudecraft.js"
+    "codecraft": "bin/codecraft.js"
   }
 }

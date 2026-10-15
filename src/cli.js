@@ -158,7 +158,7 @@ const preview = (v, n = 100) => { const s = typeof v === 'string' ? v : JSON.str
  * Returns the plain `ask` function unchanged when multiline/fullscreen isn't active or isn't possible (not a
  * real TTY, setRawMode missing) - falls back to the plain ask() on any setup failure too.
  */
-function createMultilineAsk({ stdin, stdout, rl, termMode, ask, style, cwd, onInterrupt, multiline, fullscreen, skills = [], commands }) {
+export function createMultilineAsk({ stdin, stdout, rl, termMode, ask, style, cwd, onInterrupt, multiline, fullscreen, skills = [], commands, history = [] }) {
   if (!termMode || !(multiline || fullscreen) || typeof stdin.setRawMode !== 'function') return ask;
   // Top-level entries of cwd for the "@" file-mention dropdown (own design: top-level only, no recursive/fuzzy
   // search or gitignore-awareness yet - a known, documented limitation, not a silent one). Gathered once per
@@ -196,19 +196,34 @@ function createMultilineAsk({ stdin, stdout, rl, termMode, ask, style, cwd, onIn
         for (const l of savedListeners) stdin.on('data', l);
         if (fullscreen) { stdout.write(resetScrollRegion() + disableMouse()); fullscreenActive = false; }
       };
+      // Dropdown highlight + dismiss state (EVIDENCE.md §33: the real binary's "Autocomplete" keybinding context -
+      // up/down:previous/next, tab:accept, escape:dismiss - takes priority over "Chat"'s up/down:history while a
+      // dropdown is open). `lastHitsSig` resets `selected`/`dismissed` whenever the underlying query changes, so an
+      // Escape-dismissed dropdown reopens (un-dismissed) the moment the user types something that changes the hits.
+      let selected = 0, lastHitsSig = '', dismissed = false;
+      let historyIndex = -1, draftText = null;    // "Chat" context: up/down:history:previous/next when no dropdown is showing
       // Raw hit data for Tab-acceptance; formatted separately (formatSlashSuggestions/formatFileMentions) for display.
       const currentHits = () => {
         const line0 = editor.lines[editor.row];
+        let result, sig;
         if (editor.lines.length === 1 && line0.startsWith('/') && !line0.includes(' ')) {
-          return { kind: 'slash', hits: suggestSlashCommands(line0, { skills, ...(commands ? { commands } : {}) }) };
+          result = { kind: 'slash', hits: suggestSlashCommands(line0, { skills, ...(commands ? { commands } : {}) }) };
+          sig = `slash|${line0}`;
+        } else {
+          const q = mentionQuery(line0, editor.col);
+          result = q !== null ? { kind: 'mention', hits: suggestFileMentions(q, getFileCandidates()) } : { kind: null, hits: [] };
+          sig = q !== null ? `mention|${q}` : 'none';
         }
-        const q = mentionQuery(line0, editor.col);
-        if (q !== null) return { kind: 'mention', hits: suggestFileMentions(q, getFileCandidates()) };
-        return { kind: null, hits: [] };
+        // Keyed on the query text itself, not the hit list: a query can keep matching the same single hit as more
+        // characters are typed toward it (e.g. "/stat" and "/status" both resolve to just "/status"), which would
+        // otherwise never register as "changed" and leave an Escape-dismissed dropdown stuck dismissed.
+        if (sig !== lastHitsSig) { lastHitsSig = sig; selected = 0; dismissed = false; }
+        return dismissed ? { kind: null, hits: [] } : result;
       };
       const draw = () => {
         const { kind, hits } = currentHits();
-        const suggestions = (kind === 'slash' ? formatSlashSuggestions(hits) : kind === 'mention' ? formatFileMentions(hits) : []).map((s) => style.dim(s));
+        const raw = kind === 'slash' ? formatSlashSuggestions(hits) : kind === 'mention' ? formatFileMentions(hits) : [];
+        const suggestions = raw.map((s, i) => (i === selected ? style.inverse(s) : style.dim(s)));
         const inputLines = frameLines(editor, plainPrefix.length);     // the editable content only, cursor math is relative to this
         if (fullscreen) {
           const rows = stdout.rows ?? 24;
@@ -245,23 +260,52 @@ function createMultilineAsk({ stdin, stdout, rl, termMode, ask, style, cwd, onIn
           const { kind, hits } = currentHits();
           const line0 = editor.lines[0];
           if (kind === 'slash' && hits.length) {
-            const cmd = hits[0].command.split(' ')[0];           // drop any "[usage]"/"<usage>" suffix shown alongside it
+            const cmd = hits[selected].command.split(' ')[0];    // drop any "[usage]"/"<usage>" suffix shown alongside it
             editor.lines[0] = `${cmd} `;
             editor.col = editor.lines[0].length;
             draw();
           } else if (kind === 'mention' && hits.length) {
             const at = line0.lastIndexOf('@', editor.col - 1);
-            editor.lines[0] = line0.slice(0, at + 1) + hits[0] + line0.slice(editor.col);
-            editor.col = at + 1 + hits[0].length;
+            editor.lines[0] = line0.slice(0, at + 1) + hits[selected] + line0.slice(editor.col);
+            editor.col = at + 1 + hits[selected].length;
             draw();
           }
           return;
+        }
+        if (key.name === 'escape') {
+          if (currentHits().hits.length) { dismissed = true; draw(); }
+          return;
+        }
+        if (key.name === 'up' || key.name === 'down') {
+          // Only check the dropdown before browsing history has started: once historyIndex is set, a recalled
+          // line that happens to start with "/" (e.g. a past "/status") must not hijack further up/down presses
+          // into dropdown-selection just because it incidentally matches a slash command.
+          if (historyIndex === -1) {
+            const { kind, hits } = currentHits();
+            if (kind && hits.length) {
+              selected = key.name === 'up' ? (selected - 1 + hits.length) % hits.length : (selected + 1) % hits.length;
+              draw();
+              return;
+            }
+          }
+          if (editor.lines.length === 1 && history.length) {
+            if (key.name === 'up' && historyIndex < history.length - 1) {
+              if (historyIndex === -1) draftText = editor.text;
+              historyIndex += 1; editor.setText(history[historyIndex]); draw(); return;
+            }
+            if (key.name === 'down' && historyIndex >= 0) {
+              historyIndex -= 1;
+              editor.setText(historyIndex === -1 ? (draftText ?? '') : history[historyIndex]);
+              draw(); return;
+            }
+          }
         }
         const r = editor.handleKey(key);
         if (r) {
           cleanup();
           stdout.write('\n');
-          resolve(r.submit);   // the caller's own termMode history-append already covers this, same as plain ask()
+          if (r.submit.trim() && history[0] !== r.submit) history.unshift(r.submit);
+          resolve(r.submit);   // the caller's own termMode history-append (to disk) already covers this, same as plain ask()
           return;
         }
         draw();
@@ -282,7 +326,7 @@ function createMultilineAsk({ stdin, stdout, rl, termMode, ask, style, cwd, onIn
 
 export async function main(argv, { stdin = process.stdin, stdout = process.stdout, stderr = process.stderr, env = process.env } = {}) {
   let opts;
-  try { opts = parseArgs(argv); } catch (e) { stderr.write(`claudecraft: ${e.message}\n`); return 2; }
+  try { opts = parseArgs(argv); } catch (e) { stderr.write(`codecraft: ${e.message}\n`); return 2; }
   if (opts.help) { stdout.write(HELP); return 0; }
 
   if (opts.backend === 'claude-cli') return mainClaudeCli(opts, { stdin, stdout, stderr, env });
@@ -327,15 +371,15 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
         apiKey: env.ANTHROPIC_API_KEY, baseURL: opts.baseURL ?? (env.ANTHROPIC_BASE_URL || undefined), model: opts.model,
         fallbackModel: opts.fallbackModel, stream: !opts.noStream,
       });
-  } catch (e) { stderr.write(`claudecraft: ${e.message}\n`); rl.close(); return 1; }
+  } catch (e) { stderr.write(`codecraft: ${e.message}\n`); rl.close(); return 1; }
 
   let settings;
-  try { settings = loadSettings(opts.cwd, { managedSettingsFile: opts.managedSettingsFile }); } catch (e) { stderr.write(`claudecraft: ${e.message}\n`); rl.close(); return 1; }
+  try { settings = loadSettings(opts.cwd, { managedSettingsFile: opts.managedSettingsFile }); } catch (e) { stderr.write(`codecraft: ${e.message}\n`); rl.close(); return 1; }
 
   let outputSchema;
   if (opts.outputSchemaFile) {
     try { outputSchema = JSON.parse(readFileSync(path.resolve(opts.cwd, opts.outputSchemaFile), 'utf8')); }
-    catch (e) { stderr.write(`claudecraft: --output-schema: ${e.message}\n`); rl.close(); return 1; }
+    catch (e) { stderr.write(`codecraft: --output-schema: ${e.message}\n`); rl.close(); return 1; }
   }
 
   const rules = new RuleSet({ cwd: opts.cwd });
@@ -346,21 +390,21 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
     }
     rules.addAll('allow', opts.allowedTools, 'cliArg');
     rules.addAll('deny', opts.disallowedTools, 'cliArg');
-  } catch (e) { stderr.write(`claudecraft: ${e.message}\n`); rl.close(); return 2; }
+  } catch (e) { stderr.write(`codecraft: ${e.message}\n`); rl.close(); return 2; }
   const permissionMode = opts.permissionMode ?? settings.defaultMode ?? 'default';
-  if (!PERMISSION_MODES.includes(permissionMode)) { stderr.write(`claudecraft: invalid defaultMode "${permissionMode}" in settings\n`); rl.close(); return 2; }
+  if (!PERMISSION_MODES.includes(permissionMode)) { stderr.write(`codecraft: invalid defaultMode "${permissionMode}" in settings\n`); rl.close(); return 2; }
 
   const state = createState();
   let streamed = false;
   const theme = opts.theme ?? env.REA_THEME ?? settings.theme ?? 'dark';
-  if (!THEME_NAMES.includes(theme)) { stderr.write(`claudecraft: --theme must be one of ${THEME_NAMES.join(', ')}\n`); rl.close(); return 2; }
+  if (!THEME_NAMES.includes(theme)) { stderr.write(`codecraft: --theme must be one of ${THEME_NAMES.join(', ')}\n`); rl.close(); return 2; }
   const style = createStyle(rich && colorEnabled({ stdout, env }), theme);
   const spinner = new Spinner(stdout, style, { enabled: rich && interactive });
   const renderer = rich ? new StreamRenderer((t) => stdout.write(t), style) : null;
   let turnAc = null;          // one controller per turn, so Ctrl-C cancels the turn and not the session
   let exitArmed = false;
   const store = opts.noPersist ? undefined : new SessionStore({ cwd: opts.cwd });
-  const warn = (m) => stderr.write(`claudecraft: ${m}\n`);
+  const warn = (m) => stderr.write(`codecraft: ${m}\n`);
   const agentDefs = loadAgents(opts.cwd, { warn });
   const memory = opts.noMemory ? { files: [], skipped: [] } : discoverMemory(opts.cwd, { warn });
   const skills = loadSkills(opts.cwd, { warn });
@@ -371,7 +415,7 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
   if (opts.sandboxNetwork) sbCfg.network = opts.sandboxNetwork;
   let sandboxOn = Boolean(sbCfg.enabled);
   if (sandboxOn && !sandboxAvailable()) {
-    if (sbCfg.failIfUnavailable) { stderr.write('claudecraft: sandbox requested but is not available on this platform (macOS Seatbelt or Linux bubblewrap only)\n'); rl.close(); return 1; }
+    if (sbCfg.failIfUnavailable) { stderr.write('codecraft: sandbox requested but is not available on this platform (macOS Seatbelt or Linux bubblewrap only)\n'); rl.close(); return 1; }
     warn('sandbox requested but not available on this platform; Bash commands will run unsandboxed');
     sandboxOn = false;
   }
@@ -387,7 +431,7 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
     let lspServers;
     if (opts.lspConfigFile) {
       try { lspServers = { ...DEFAULT_SERVERS, ...JSON.parse(readFileSync(path.resolve(opts.cwd, opts.lspConfigFile), 'utf8')).servers }; }
-      catch (e) { stderr.write(`claudecraft: --lsp-config: ${e.message}\n`); rl.close(); return 1; }
+      catch (e) { stderr.write(`codecraft: --lsp-config: ${e.message}\n`); rl.close(); return 1; }
     }
     lspTool = createLspTool({ cwd: opts.cwd, warn, ...(lspServers ? { servers: lspServers } : {}) });
     tools.push(lspTool);
@@ -509,7 +553,7 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
     compactionExtra: () => (taskList.items.length ? `Task list at the time of compaction:\n${taskList.render()}` : ''),
     contextWindow: opts.contextWindow ?? windowForModel(model.modelName),
     system: buildSystemPrompt({ cwd: opts.cwd }), maxTurns: opts.maxTurns,
-    hooks: buildHooks(settings, { cwd: opts.cwd, warn: (m) => stderr.write(`claudecraft: ${m}\n`) }),
+    hooks: buildHooks(settings, { cwd: opts.cwd, warn: (m) => stderr.write(`codecraft: ${m}\n`) }),
     askUser: serialize(async ({ label, rule, outsideWorkspace, note: shellNote }) => {
       // print mode with no terminal to prompt on: deny rather than hang.
       if (!interactive && !stdin.isTTY) return false;
@@ -545,16 +589,16 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
           break;
         }
         case 'absorbed_mid_turn': spinner.stop(); stdout.write(`${style.dim('  ↳ added your message to the running turn')}\n`); break;
-        case 'micro_compact': spinner.stop(); stderr.write(`claudecraft: cleared ${e.cleared} old tool result(s), freeing ~${e.freedTokens} tokens\n`); break;
+        case 'micro_compact': spinner.stop(); stderr.write(`codecraft: cleared ${e.cleared} old tool result(s), freeing ~${e.freedTokens} tokens\n`); break;
         case 'cache_miss': break;     // counted in /usage; not worth interrupting the user
-        case 'retry': spinner.stop(); stderr.write(`\nclaudecraft: ${e.kind}; retry ${e.attempt} in ${Math.round(e.delayMs)}ms\n`); streamed = false; break;
-        case 'model_fallback': spinner.stop(); stderr.write(`claudecraft: switching model ${e.from} -> ${e.to}\n`); break;
-        case 'warning': spinner.stop(); stderr.write(`claudecraft: ${e.message}\n`); break;
-        case 'compact_start': spinner.stop(); stderr.write(`claudecraft: compacting context (${e.trigger}, ~${e.tokens} tokens)...\n`); spinner.start('Compacting'); break;
-        case 'compact_skipped': spinner.stop(); stderr.write(`claudecraft: compaction skipped: ${e.reason}\n`); break;
-        case 'compact_end': spinner.stop(); stderr.write(`claudecraft: compacted ~${e.preTokens} -> ~${e.postTokens} tokens (${e.summarized} messages summarized${e.reattached?.length ? `, ${e.reattached.length} file(s) re-attached` : ''})\n`); break;
-        case 'context_warning': spinner.stop(); stderr.write(`claudecraft: context is ${100 - e.pctLeft}% of the way to auto-compaction\n`); break;
-        case 'error': spinner.stop(); stderr.write(`claudecraft: ${e.error.message}\n`); break;
+        case 'retry': spinner.stop(); stderr.write(`\ncodecraft: ${e.kind}; retry ${e.attempt} in ${Math.round(e.delayMs)}ms\n`); streamed = false; break;
+        case 'model_fallback': spinner.stop(); stderr.write(`codecraft: switching model ${e.from} -> ${e.to}\n`); break;
+        case 'warning': spinner.stop(); stderr.write(`codecraft: ${e.message}\n`); break;
+        case 'compact_start': spinner.stop(); stderr.write(`codecraft: compacting context (${e.trigger}, ~${e.tokens} tokens)...\n`); spinner.start('Compacting'); break;
+        case 'compact_skipped': spinner.stop(); stderr.write(`codecraft: compaction skipped: ${e.reason}\n`); break;
+        case 'compact_end': spinner.stop(); stderr.write(`codecraft: compacted ~${e.preTokens} -> ~${e.postTokens} tokens (${e.summarized} messages summarized${e.reattached?.length ? `, ${e.reattached.length} file(s) re-attached` : ''})\n`); break;
+        case 'context_warning': spinner.stop(); stderr.write(`codecraft: context is ${100 - e.pctLeft}% of the way to auto-compaction\n`); break;
+        case 'error': spinner.stop(); stderr.write(`codecraft: ${e.error.message}\n`); break;
         default: break;
       }
     },
@@ -589,7 +633,7 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
   };
   if (opts.continue || opts.resume) {
     const err = resumeInto(opts.continue ? 'latest' : opts.resume);
-    if (err) { stderr.write(`claudecraft: ${err}\n`); await closeMcp(); rl.close(); return 1; }
+    if (err) { stderr.write(`codecraft: ${err}\n`); await closeMcp(); rl.close(); return 1; }
   }
   await harness.sessionStart(opts.continue || opts.resume ? 'resume' : 'startup');
   if (memory.files.length) await harness.emitHook('InstructionsLoaded', { files: memory.files.map((f) => ({ path: f.path, type: f.type })) });
@@ -614,10 +658,10 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
     spinner.start('Thinking');
     try {
       const r = await harness.run(prompt);
-      if (r.reason === 'max_turns') stderr.write(`claudecraft: stopped after ${r.turns} turns (--max-turns)\n`);
-      if (r.stopped === 'aborted') stderr.write('claudecraft: interrupted\n');
+      if (r.reason === 'max_turns') stderr.write(`codecraft: stopped after ${r.turns} turns (--max-turns)\n`);
+      if (r.stopped === 'aborted') stderr.write('codecraft: interrupted\n');
       return r;
-    } catch (e) { stderr.write(`claudecraft: ${e.message}\n`); return null; } finally {
+    } catch (e) { stderr.write(`codecraft: ${e.message}\n`); return null; } finally {
       spinner.stop();
       renderer?.flush();
       live.turnActive = false;
@@ -639,12 +683,12 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
 
   const multilineAsk = createMultilineAsk({
     stdin, stdout, rl, termMode, ask, style, cwd: () => rules.cwd, onInterrupt,
-    multiline: opts.multiline, fullscreen: opts.fullscreen, skills,
+    multiline: opts.multiline, fullscreen: opts.fullscreen, skills, history,
   });
 
   if (!interactive) {
     const ex = await expandSlash(opts.prompt);
-    if (ex.unknown) { stderr.write(`claudecraft: unknown command /${ex.unknown}\n`); await harness.sessionEnd('exit'); await closeMcp(); rl.close(); return 2; }
+    if (ex.unknown) { stderr.write(`codecraft: unknown command /${ex.unknown}\n`); await harness.sessionEnd('exit'); await closeMcp(); rl.close(); return 2; }
     const r = await turn(ex.prompt);
     if (r?.structuredOutput !== undefined) stdout.write(`${JSON.stringify(r.structuredOutput, null, 2)}\n`);
     await harness.sessionEnd('exit');
@@ -654,7 +698,7 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
   }
 
   slashNames.push(...skills.filter((x) => x.userInvocable).map((x) => x.name));
-  stdout.write(`${style.bold('claudecraft')} ${style.dim(`(${model.modelName}, ${permissionMode}) in ${opts.cwd}`)}\n${style.dim('Type a request; /compact, /clear, /context, /resume, /memory, /skills, /mcp, /permissions, /agents, /exit.')}\n`);
+  stdout.write(`${style.bold('codecraft')} ${style.dim(`(${model.modelName}, ${permissionMode}) in ${opts.cwd}`)}\n${style.dim('Type a request; /compact, /clear, /context, /resume, /memory, /skills, /mcp, /permissions, /agents, /exit.')}\n`);
   if (opts.prompt) { const ex = await expandSlash(opts.prompt); await turn(ex.prompt ?? opts.prompt); }
   for (;;) {
     let line;
@@ -852,12 +896,12 @@ export async function main(argv, { stdin = process.stdin, stdout = process.stdou
   return 0;
 }
 
-// Reference mode: Claude Code runs its own loop and tools; claudecraft only relays events.
+// Reference mode: Claude Code runs its own loop and tools; codecraft only relays events.
 async function mainClaudeCli(opts, { stdin, stdout, stderr, env }) {
   const interactive = opts.print === undefined;
   const rich = richEnabled({ stdout, env, plain: opts.plain });
   const theme = opts.theme ?? env.REA_THEME ?? 'dark';
-  if (!THEME_NAMES.includes(theme)) { stderr.write(`claudecraft: --theme must be one of ${THEME_NAMES.join(', ')}\n`); return 2; }
+  if (!THEME_NAMES.includes(theme)) { stderr.write(`codecraft: --theme must be one of ${THEME_NAMES.join(', ')}\n`); return 2; }
   const style = createStyle(rich && colorEnabled({ stdout, env }), theme);
   const spinner = new Spinner(stdout, style, { enabled: rich && interactive });
   const ac = new AbortController();
@@ -888,11 +932,11 @@ async function mainClaudeCli(opts, { stdin, stdout, stderr, env }) {
           const body = preview(String(e.result.content).replace(/\s+/g, ' '), 140);
           stdout.write(`  ${style.dim('⎿')} ${e.result.is_error ? style.red(`✗ ${body}`) : style.dim(body)}\n`);
           spinner.start('Thinking');
-        } else if (e.type === 'error') { stderr.write(`claudecraft: ${e.error.message}\n`); }
+        } else if (e.type === 'error') { stderr.write(`codecraft: ${e.error.message}\n`); }
       }
       spinner.stop();
       const t = step.value;
-      if (t.costUsd !== undefined) stderr.write(`claudecraft: ${style.dim(`[claude-cli] ${t.turns} turns, $${Number(t.costUsd).toFixed(4)}, ${t.durationMs ?? '?'}ms`)}\n`);
+      if (t.costUsd !== undefined) stderr.write(`codecraft: ${style.dim(`[claude-cli] ${t.turns} turns, $${Number(t.costUsd).toFixed(4)}, ${t.durationMs ?? '?'}ms`)}\n`);
       return t.reason === 'completed' ? 0 : 1;
     } finally { turnActive = false; }
   };
@@ -916,14 +960,14 @@ async function mainClaudeCli(opts, { stdin, stdout, stderr, env }) {
   // itself and emits its own 'SIGINT' event instead, so that's what needs listening to here, same as the default path.
   if (termMode) rl.on('SIGINT', onInterrupt); else process.on('SIGINT', onInterrupt);
   // Only /exit and /quit are real commands in this reference-mode backend (Claude Code runs its own loop and
-  // slash commands; claudecraft only relays events) - the "/" dropdown must reflect that, not the full
+  // slash commands; codecraft only relays events) - the "/" dropdown must reflect that, not the full
   // default-path command list, which would show commands that don't work here.
   const ask = (promptText) => rl.question(promptText);
   const multilineAsk = createMultilineAsk({
     stdin, stdout, rl, termMode, ask, style, cwd: () => opts.cwd, onInterrupt,
-    multiline: opts.multiline, fullscreen: opts.fullscreen, commands: [['exit', '', 'quit'], ['quit', '', 'alias for /exit']],
+    multiline: opts.multiline, fullscreen: opts.fullscreen, commands: [['exit', '', 'quit'], ['quit', '', 'alias for /exit']], history: [],
   });
-  stdout.write(`${style.bold('claudecraft')} ${style.dim(`(claude-cli backend, ${opts.permissionMode ?? 'default'}) in ${opts.cwd}`)}\nType a request; /exit to quit.\n`);
+  stdout.write(`${style.bold('codecraft')} ${style.dim(`(claude-cli backend, ${opts.permissionMode ?? 'default'}) in ${opts.cwd}`)}\nType a request; /exit to quit.\n`);
   let code = 0;
   if (opts.prompt) code = await run(opts.prompt);
   for (;;) {

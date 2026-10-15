@@ -29,6 +29,7 @@ export function parseKey(chunk) {
   if (s === '\x1b[13;2u') return { name: 'shift-enter' }; // Kitty keyboard protocol, if the terminal sends it
   if (s === '\x03') return { name: 'ctrl-c' };
   if (s === '\t') return { name: 'tab' };
+  if (s === '\x1b') return { name: 'escape' };            // bare ESC only; every longer \x1b... sequence is matched above first
   if (s.length === 1 && s >= ' ') return { name: 'char', char: s };
   if (!s.startsWith('\x1b') && [...s].every((c) => c >= ' ' || c === '\t')) return { name: 'text', text: s };  // paste
   return null;
@@ -58,6 +59,8 @@ export class LineEditor {
 
   get text() { return this.lines.join('\n'); }
   get empty() { return this.lines.length === 1 && this.lines[0] === ''; }
+
+  setText(text) { this.lines = text.split('\n'); this.row = this.lines.length - 1; this.col = this.lines[this.row].length; }
 
   #insertNewline() {
     const line = this.lines[this.row];

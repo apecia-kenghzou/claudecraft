@@ -1,7 +1,7 @@
 // Terminal UI building blocks. Pure where possible so they can be tested without a TTY.
 // Rich output is enabled only for a real terminal (see richEnabled); piped/CI output stays plain text.
 
-const STRUCTURAL_CODES = { bold: '1', dim: '2', italic: '3', underline: '4' };
+const STRUCTURAL_CODES = { bold: '1', dim: '2', italic: '3', underline: '4', inverse: '7' };
 
 /**
  * Color presets (own design - no bundle evidence for exact codes/palette). Each maps the same semantic role names

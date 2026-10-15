@@ -640,3 +640,51 @@ setup to session start with the cursor anchored at the bottom row, done once, no
 risk for a cosmetic feature): `--fullscreen` is opt-in again, `--multiline` (the simpler, more-tested path - no
 scroll region, no mouse, no lazy/cyclical state) is on by default instead. `--no-multiline`/`--no-fullscreen` are
 both available to opt out of either. The underlying --fullscreen bug is not yet fixed, just no longer defaulted on.
+
+## 33. Dropdown arrow-key selection, Escape-to-dismiss, up/down command history (v0.32)
+Source: `strings -n 8` on the real binary surfaced its actual keybinding table verbatim (`KB=[{context:"Global",
+bindings:{...}},{context:"Chat",bindings:{...enter:"chat:submit",up:"history:previous",down:"history:next",...}},
+{context:"Autocomplete",bindings:{tab:"autocomplete:accept",escape:"autocomplete:dismiss",up:"autocomplete:previous",
+down:"autocomplete:next"}},...]`) - confirming two gaps already flagged as known limitations in ARCHITECTURE.md
+(arrow-key dropdown selection was Tab-only-accepts-the-top-hit; there was no command-history recall in the raw-mode
+editor at all, only in the plain-ask fallback path via readline's own history).
+
+Ported both, keyed off the same `createMultilineAsk()` factory (`src/cli.js`) shared by both backends:
+- **Dropdown**: up/down cycle a `selected` index (wrapping) through the current hits, drawn with inverse video
+  (`style.inverse`, new in `src/ui.js` - `\x1b[7m`, own design, no bundle evidence for the exact highlight style,
+  only for its existence); Tab now accepts `hits[selected]`, not always `hits[0]`. Escape dismisses the dropdown
+  (bare ESC - `parseKey()` in `src/editor.js` gained an `escape` key, matched only after every longer `\x1b...`
+  sequence, so it never misfires on an arrow key or other escape-prefixed input). The dismissal is keyed off the
+  query *text*, not the hit list, so it survives re-opening correctly: a query like "/stat" and the "/status" it
+  becomes both resolve to the same single hit, so keying the reset off the hit list (the first attempt) left a
+  dismissed dropdown stuck dismissed as the user kept typing toward the one match that already matched.
+- **History**: up/down recall previously-submitted lines (most-recent-first) when the editor is a single line and
+  no dropdown is showing; `main()`'s already-loaded, disk-persisted `history` array (`~/.rea/history`) is passed
+  into the factory directly rather than duplicating it, and the factory unshifts each submission onto it so recall
+  works immediately within the same session, not just across restarts. A real edge case found and fixed while
+  testing this: once history recall is active (`historyIndex !== -1`), further up/down must keep browsing history
+  even if the recalled line happens to look like a slash command (e.g. a recalled "/status") - otherwise the
+  dropdown-selection branch hijacks the keypress just because the text incidentally matches. Fixed by only
+  consulting the dropdown when `historyIndex === -1` (browsing hasn't started yet).
+
+Verified with a deterministic fake-stdin harness (`test/multiline.test.js`, 6 tests) rather than another one-off
+real-pty script: this logic is plain key/data processing, not raw-terminal-mode-specific (the actual TTY-only
+pieces - the scroll region and mouse reporting - live entirely in `src/screen.js`, already covered). `createMultilineAsk`
+is now exported from `src/cli.js` specifically so it has durable test coverage instead of only ad hoc pty checks.
+
+Still not ported (same as before, now re-confirmed by the real keybinding table rather than inferred): recursive/
+fuzzy "@" file search, an external-editor handoff (`ctrl+x ctrl+e`: "chat:externalEditor"), `ctrl+r`/`chat:undo`,
+and the `ctrl+s`/"chat:stash" shelving command - none of these were in the original scope the user asked to finish.
+
+## 34. Renamed the product from "ClaudeCraft" to "CodeCraft" (v0.32)
+At the user's request, every user-facing and source occurrence of "ClaudeCraft"/"claudecraft" was renamed to
+"CodeCraft"/"codecraft" (`README.md`, `LICENSE`, `package.json`'s `name`/`bin` entry, `bin/claudecraft.js` ->
+`bin/codecraft.js`, every `stderr.write('claudecraft: ...')`-style message and banner in `src/cli.js`, and the two
+test files that spawn the binary by path). The GitHub remote itself (`apecia-kenghzou/claudecraft`) was not
+renamed - only this project's own branding - so `README.md`'s clone URL and `package.json`'s `repository.url`
+still point at the real (unrenamed) repo; only the locally-installed command name changed.
+Deliberately not touched: the deeper "rea" namespace used throughout the codebase and predating "ClaudeCraft" -
+env vars (`REA_MODEL`, `REA_PROVIDER`, `REA_API_KEY`, `REA_THEME`, `REA_PLAIN`), the `~/.rea` settings/history
+directory, the `REA.md` memory file convention, and the `--help` banner's own "rea-code" usage line. That is a
+much larger, separate rename (dozens of call sites, user-visible config paths, and backward-compatibility
+questions for anyone with an existing `~/.rea` directory) that was not part of what was asked here.

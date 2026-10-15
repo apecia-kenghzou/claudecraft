@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdi
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-const BIN = path.resolve('bin/claudecraft.js');
+const BIN = path.resolve('bin/codecraft.js');
 const tool = (id, name, input) => ({ type: 'tool_use', id, name, input });
 const reply = (...content) => ({ content, stop_reason: content.some((b) => b.type === 'tool_use') ? 'tool_use' : 'end_turn', usage: {} });
 
